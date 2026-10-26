@@ -7,7 +7,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QProgressBar, QToolButton, QVBoxLayout
 
 from ..engine.models import Download, Kind, Status
-from .formatting import fmt_bytes, fmt_eta, fmt_speed
+from .formatting import fmt_bytes, fmt_eta, fmt_speed, plain_tip
 from .icons import icon, pixmap
 from .theme import status_color
 
@@ -83,13 +83,13 @@ class DownloadCard(QFrame):
         self._icon.setFixedSize(46, 46)
         self._icon.setAlignment(Qt.AlignCenter)
         self._name = QLabel(objectName="cardName")
-        self._name.setTextFormat(Qt.PlainText)
         self._meta = QLabel(objectName="cardMeta")
         self._bar = QProgressBar(objectName="cardBar")
         self._bar.setTextVisible(False)
         self._status = QLabel(objectName="cardStatus")
         self._detail = QLabel(objectName="cardDetail")
-        self._detail.setTextFormat(Qt.PlainText)
+        for label in (self._name, self._meta, self._status, self._detail):
+            label.setTextFormat(Qt.PlainText)
         self._primary = QToolButton(objectName="cardPrimary")
         self._remove = QToolButton(objectName="cardRemove")
         self._remove.setAccessibleName("Remove")
@@ -133,12 +133,12 @@ class DownloadCard(QFrame):
         self.download = d
         self._name.setText(d.title if d.kind is not Kind.FILE and d.title and d.status is not Status.COMPLETED
                            else d.filename)
-        self._name.setToolTip(d.filename)
+        self._name.setToolTip(plain_tip(d.filename))
         self._meta.setText(" · ".join(p for p in (fmt_bytes(d.size), d.quality, d.host) if p))
         status, detail = status_texts(d, speed, eta)
         self._status.setText(status)
         self._detail.setText(detail)
-        self._detail.setToolTip(detail)
+        self._detail.setToolTip(plain_tip(detail))
         pct = _pct(d)
         if d.status is Status.DOWNLOADING and pct is None:
             self._bar.setRange(0, 0)

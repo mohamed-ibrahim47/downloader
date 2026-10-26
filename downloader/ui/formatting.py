@@ -1,5 +1,20 @@
-"""Numbers as people read them: sizes, speeds, time left."""
+"""Numbers as people read them: sizes, speeds, time left. Plus plain-text helpers for Qt."""
 from __future__ import annotations
+
+import html
+
+
+def plain_tip(text: str) -> str:
+    """Tooltip text that Qt can never read as HTML (names and errors come from servers)."""
+    return f"<p style='white-space:pre-wrap'>{html.escape(text)}</p>"
+
+
+def fmt_duration(seconds: int | None) -> str:
+    if not seconds:
+        return ""
+    if seconds < 3600:
+        return f"{seconds // 60} min {seconds % 60} s"
+    return f"{seconds // 3600} h {(seconds % 3600) // 60} min"
 
 
 def fmt_bytes(n: int | float | None) -> str:

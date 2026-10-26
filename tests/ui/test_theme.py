@@ -34,6 +34,13 @@ def test_fmt_speed():
     assert fmt_speed(0) == "0 B/s"
 
 
+def test_fmt_duration():
+    from downloader.ui.formatting import fmt_duration
+    assert fmt_duration(None) == ""
+    assert fmt_duration(596) == "9 min 56 s"
+    assert fmt_duration(34_860) == "9 h 41 min"
+
+
 def test_fmt_eta():
     assert fmt_eta(None) == ""
     assert fmt_eta(11) == "about 11 s left"

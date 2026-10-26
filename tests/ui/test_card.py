@@ -86,6 +86,16 @@ def test_card_completed(qtbot):
     assert _primary(card).accessibleName() == "Open folder"
 
 
+def test_card_shows_markup_as_plain_text(qtbot):
+    d = _d(filename="<b>bold</b>.zip", url="https://x.com/a", quality="<i>q</i>",
+           status=Status.FAILED, error="<img src='file:///C:/x.png'>")
+    card = _card(qtbot, d)
+    for name in ("cardName", "cardMeta", "cardStatus", "cardDetail"):
+        assert card.findChild(QLabel, name).textFormat() == Qt.PlainText
+    assert "&lt;b&gt;" in card.findChild(QLabel, "cardName").toolTip()
+    assert "&lt;img" in card.findChild(QLabel, "cardDetail").toolTip()
+
+
 def test_card_primary_emits_id(qtbot):
     card = _card(qtbot, _d())
     with qtbot.waitSignal(card.primary_clicked) as sig:
