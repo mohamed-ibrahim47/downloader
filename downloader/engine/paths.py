@@ -8,7 +8,13 @@ import unicodedata
 from pathlib import Path
 
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-_RESERVED = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)", re.I)
+_RESERVED = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} | {
+    f"{dev}{n}" for dev in ("COM", "LPT") for n in "0123456789¹²³"}
+
+
+def _is_reserved(name: str) -> bool:
+    # Windows ignores everything from the first dot, and trailing spaces, when matching devices.
+    return name.split(".", 1)[0].rstrip(" ").upper() in _RESERVED
 _MAX_NAME = 200
 
 
@@ -32,7 +38,7 @@ def safe_filename(name: str) -> str:
     name = _ILLEGAL.sub("", name).strip().rstrip(". ").strip()
     if not name:
         return "download"
-    if _RESERVED.match(name):
+    if _is_reserved(name):
         name = "_" + name
     if len(name) > _MAX_NAME:
         stem, dot, ext = name.rpartition(".")

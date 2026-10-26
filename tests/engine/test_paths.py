@@ -33,6 +33,10 @@ def test_safe_filename_renames_reserved_device_names():
     assert safe_filename("nul.txt") == "_nul.txt"
     assert safe_filename("COM1.tar.gz") == "_COM1.tar.gz"
     assert safe_filename("CONSOLE.txt") == "CONSOLE.txt"
+    assert safe_filename("CON .txt") == "_CON .txt"
+    assert safe_filename("com0.log") == "_com0.log"
+    assert safe_filename("LPT¹.txt") == "_LPT¹.txt"
+    assert safe_filename("CONIN$") == "_CONIN$"
 
 
 def test_unique_path_adds_suffix(tmp_path):
