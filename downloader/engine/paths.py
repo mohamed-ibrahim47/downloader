@@ -4,9 +4,11 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import unicodedata
 from pathlib import Path
 
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_RESERVED = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)", re.I)
 _MAX_NAME = 200
 
 
@@ -23,10 +25,15 @@ def data_home() -> Path:
 
 
 def safe_filename(name: str) -> str:
-    """A name Windows accepts: illegal characters removed, trimmed, at most 200 characters."""
+    """A name Windows accepts and that shows what it is: illegal characters and invisible
+    formatting characters (which can disguise `fdp.exe` as `exe.pdf`) removed, reserved device
+    names prefixed, trimmed, at most 200 characters."""
+    name = "".join(ch for ch in name if unicodedata.category(ch) not in ("Cc", "Cf"))
     name = _ILLEGAL.sub("", name).strip().rstrip(". ").strip()
     if not name:
         return "download"
+    if _RESERVED.match(name):
+        name = "_" + name
     if len(name) > _MAX_NAME:
         stem, dot, ext = name.rpartition(".")
         if dot and 0 < len(ext) <= 10:

@@ -28,6 +28,11 @@ def test_probe_filename_star(http_server):
     assert probe(url).filename == "ملف.zip"
 
 
+def test_probe_unknown_charset_does_not_crash(http_server):
+    url = http_server.add("/dl3", b"x", disposition="attachment; filename*=x-bogus''%41bc.zip")
+    assert probe(url).filename == "Abc.zip"
+
+
 def test_probe_plain_disposition(http_server):
     url = http_server.add("/dl2", b"x", disposition='attachment; filename="report 2025.pdf"')
     assert probe(url).filename == "report 2025.pdf"

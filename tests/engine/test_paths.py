@@ -23,6 +23,18 @@ def test_safe_filename_keeps_unicode_and_caps_length():
     assert long.endswith(".zip")
 
 
+def test_safe_filename_strips_bidi_and_invisible_controls():
+    assert safe_filename("invoice‮fdp.exe") == "invoicefdp.exe"
+    assert safe_filename("a‎b⁦c⁩.txt") == "abc.txt"
+
+
+def test_safe_filename_renames_reserved_device_names():
+    assert safe_filename("CON") == "_CON"
+    assert safe_filename("nul.txt") == "_nul.txt"
+    assert safe_filename("COM1.tar.gz") == "_COM1.tar.gz"
+    assert safe_filename("CONSOLE.txt") == "CONSOLE.txt"
+
+
 def test_unique_path_adds_suffix(tmp_path):
     (tmp_path / "a.zip").write_bytes(b"1")
     (tmp_path / "a (2).zip").write_bytes(b"1")

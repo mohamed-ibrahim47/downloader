@@ -26,7 +26,10 @@ def filename_from_disposition(header: str | None) -> str | None:
         return None
     m = re.search(r"filename\*\s*=\s*([^']*)'[^']*'([^;]+)", header, re.I)
     if m:
-        return unquote(m.group(2).strip().strip('"'), encoding=m.group(1) or "utf-8", errors="replace")
+        charset = (m.group(1) or "utf-8").strip().lower()
+        if charset not in ("utf-8", "iso-8859-1"):
+            charset = "utf-8"
+        return unquote(m.group(2).strip().strip('"'), encoding=charset, errors="replace")
     m = re.search(r'filename\s*=\s*"([^"]*)"', header, re.I) or re.search(r"filename\s*=\s*([^;]+)", header, re.I)
     return m.group(1).strip() if m else None
 
