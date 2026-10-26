@@ -40,6 +40,32 @@ def test_card_downloading_text(qtbot):
     assert card.property("status") == "downloading"
 
 
+def test_card_status_label_fits_its_text(qtbot, qapp):
+    from downloader.ui.theme import load_fonts, stylesheet
+    load_fonts()
+    before = qapp.styleSheet()
+    qapp.setStyleSheet(stylesheet("dark"))  # as the app does: on the application, not the card
+    try:
+        card = _card(qtbot, _d(status=Status.QUEUED, downloaded=0))
+        card.resize(900, 74)
+        card.show()
+        qtbot.waitExposed(card)
+        card.update_from(_d(), speed=13_200_000, eta=150)  # status changes: queued -> downloading
+        qtbot.wait(50)
+        label = card.findChild(QLabel, "cardStatus")
+        assert label.width() >= label.fontMetrics().horizontalAdvance(label.text())
+    finally:
+        qapp.setStyleSheet(before)
+
+
+def test_card_just_started_says_starting(qtbot):
+    d = _d(downloaded=0)
+    card = _card(qtbot, d)
+    card.update_from(d, speed=0.0, eta=None)
+    assert _text(card, "cardStatus") == "Starting…"
+    assert _text(card, "cardDetail") == "connecting · 8 connections"
+
+
 def test_card_failed_shows_error_and_retry(qtbot):
     d = _d(status=Status.FAILED, error="server refused (403) · link may have expired")
     card = _card(qtbot, d)

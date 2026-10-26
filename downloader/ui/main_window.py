@@ -5,7 +5,7 @@ import dataclasses
 from datetime import datetime
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QMainWindow,
                                QPushButton, QStackedWidget, QSystemTrayIcon, QToolButton, QVBoxLayout,
                                QWidget)
@@ -24,7 +24,7 @@ from .pages import SchedulerPage, SettingsPage
 from .queue_panel import QueuePanel
 from .smart_bar import SmartBar
 from .sparkline import Sparkline
-from .theme import PALETTES, stylesheet
+from .theme import APP_ICON, PALETTES, stylesheet
 from .tray import Tray
 
 CHIPS = (("all", "All"), ("active", "Active"), ("queued", "Queued"), ("completed", "Completed"))
@@ -150,6 +150,9 @@ class MainWindow(QMainWindow):
         header.addStretch(1)
         self.sparkline = Sparkline(palette["accent"])
         self.speed_label = QLabel("", objectName="speedTotal")
+        self.speed_label.setToolTip("Total download speed")
+        self.speed_label.setMinimumWidth(72)
+        self.speed_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         header.addWidget(self.sparkline)
         header.addWidget(self.speed_label)
         col.addLayout(header)
@@ -188,7 +191,7 @@ class MainWindow(QMainWindow):
 
     def _on_speed(self, rate: float, history: list) -> None:
         self.sparkline.set_data(history)
-        self.speed_label.setText(f"<b>{fmt_speed(rate)}</b> total")
+        self.speed_label.setText(f"<b>{fmt_speed(rate)}</b>")
 
     def _update_chips(self) -> None:
         counts = self.list.counts()
@@ -289,4 +292,4 @@ class MainWindow(QMainWindow):
         self.sparkline.set_color(p["accent"])
         self.smart_bar.set_palette(p)
         self.list.set_palette(p)
-        self.setWindowIcon(icon("download", p["accent"], 64, 2.4))
+        self.setWindowIcon(QIcon(str(APP_ICON)))

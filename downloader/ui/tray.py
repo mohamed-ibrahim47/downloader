@@ -1,14 +1,15 @@
 """The tray icon: keeps downloads going with the window closed, and shows finished/failed messages."""
 from __future__ import annotations
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from .icons import icon
+from .theme import APP_ICON
 
 
 class Tray(QSystemTrayIcon):
     def __init__(self, window, controller, accent: str):
-        super().__init__(icon("download", accent, 32, 2.4), window)
+        super().__init__(QIcon(str(APP_ICON)), window)
         self.setToolTip("Downloader")
         menu = QMenu(window)
         menu.addAction("Show", window.bring_to_front)

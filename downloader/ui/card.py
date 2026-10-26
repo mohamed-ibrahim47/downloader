@@ -48,9 +48,12 @@ def status_texts(d: Download, speed: float | None, eta: float | None) -> tuple[s
     """The coloured status line and the muted detail line under the progress bar."""
     pct = _pct(d)
     if d.status is Status.DOWNLOADING:
-        head = f"{pct}%" if pct is not None else fmt_bytes(d.downloaded)
-        status = f"{head} · {fmt_speed(speed)}"
-        parts = [f"{fmt_bytes(d.downloaded)} done", fmt_eta(eta)]
+        if d.downloaded:
+            head = f"{pct}%" if pct is not None else fmt_bytes(d.downloaded)
+            status = f"{head} · {fmt_speed(speed)}"
+            parts = [f"{fmt_bytes(d.downloaded)} done", fmt_eta(eta)]
+        else:
+            status, parts = "Starting…", ["connecting"]
         if d.kind is Kind.FILE:
             n = d.connections if d.resumable else 1
             parts.append(f"{n} connection{'s' if n != 1 else ''}")

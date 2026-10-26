@@ -25,7 +25,9 @@ PALETTES: dict[str, dict[str, str]] = {
 STATUS_COLOR = {"downloading": "accent", "queued": "queued", "paused": "paused", "failed": "error",
                 "completed": "done"}
 
-FONTS = Path(__file__).parent / "assets" / "fonts"
+ASSETS = Path(__file__).parent / "assets"
+FONTS = ASSETS / "fonts"
+APP_ICON = ASSETS / "app.png"
 SANS = '"Inter Variable", "Inter", "Segoe UI", sans-serif'
 MONO = '"Cascadia Mono", "Consolas", monospace'
 
