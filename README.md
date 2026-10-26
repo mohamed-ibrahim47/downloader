@@ -3,9 +3,9 @@
 A fast download manager for Windows, in the spirit of Internet Download Manager. Paste any link (a file,
 a YouTube video or a whole playlist) and Downloader works out what it is and shows the right options.
 
-![Downloader, dark theme](docs/screenshots/dark.png)
+![Downloader, dark theme](screenshots/dark.png)
 
-![Downloader, light theme](docs/screenshots/light.png)
+![Downloader, light theme](screenshots/light.png)
 
 ## Features
 
