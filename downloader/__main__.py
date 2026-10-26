@@ -28,6 +28,8 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings.load(store)
     controller = Controller(store, settings)
     window = MainWindow(controller, settings, store)
+    # With a tray icon, closing the window while downloading keeps the app running.
+    app.setQuitOnLastWindowClosed(window.tray is None)
     window.show()
     if "--smoke" in argv:
         QTimer.singleShot(1500, app.quit)

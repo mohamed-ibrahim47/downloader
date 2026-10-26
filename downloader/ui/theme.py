@@ -108,7 +108,7 @@ QLabel#stepValue {{ font-size: 16px; font-weight: 600; }}
 QPushButton#segButton {{ min-height: 34px; border-radius: 8px; border: 1px solid {c['border']};
     background: transparent; font-size: 12px; }}
 QPushButton#segButton:checked {{ background: {c['navActive']}; border-color: {c['accent']}; }}
-QComboBox, QSpinBox, QTimeEdit, QLineEdit#field {{ min-height: 34px; border-radius: 10px; border: 1px solid {c['border']};
+QComboBox, QSpinBox, QTimeEdit, QLineEdit#field, QLineEdit[role="field"] {{ min-height: 34px; border-radius: 10px; border: 1px solid {c['border']};
     background: {c['surface']}; padding: 0 10px; }}
 QComboBox::drop-down {{ border: none; width: 26px; }}
 QComboBox QAbstractItemView {{ background: {c['surface']}; border: 1px solid {c['border']};

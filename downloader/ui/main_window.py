@@ -1,22 +1,31 @@
 """The main window, laid out like mockup board B: rail, header, smart bar, cards, queue panel."""
 from __future__ import annotations
 
+import dataclasses
+from datetime import datetime
+
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QMainWindow,
-                               QPushButton, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
+                               QPushButton, QStackedWidget, QSystemTrayIcon, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from ..engine.linkkind import LinkKind, classify
+from ..engine.models import Status
+from ..engine.power import sleep_pc
+from ..engine.scheduler import due_action
 from ..engine.settings import Settings
 from ..engine.store import Store
 from .controller import Controller
 from .download_list import DownloadList
 from .formatting import fmt_speed
 from .icons import icon, pixmap
+from .pages import SchedulerPage, SettingsPage
 from .queue_panel import QueuePanel
 from .smart_bar import SmartBar
 from .sparkline import Sparkline
 from .theme import PALETTES, stylesheet
+from .tray import Tray
 
 CHIPS = (("all", "All"), ("active", "Active"), ("queued", "Queued"), ("completed", "Completed"))
 NAV = (("downloads", "list", "Downloads"), ("videos", "video", "Videos and playlists"),
@@ -40,8 +49,8 @@ class MainWindow(QMainWindow):
 
         self.pages = QStackedWidget()
         self.pages.addWidget(self._build_downloads_page(palette))
-        self.scheduler_page = QWidget(objectName="page")
-        self.settings_page = QWidget(objectName="page")
+        self.scheduler_page = SchedulerPage(settings, self.apply_settings)
+        self.settings_page = SettingsPage(settings, self.apply_settings)
         self.pages.addWidget(self.scheduler_page)
         self.pages.addWidget(self.settings_page)
         row.addWidget(self.pages, 1)
@@ -54,6 +63,18 @@ class MainWindow(QMainWindow):
         self.ctl.changed.connect(self._on_changed)
         self.ctl.removed.connect(self._on_removed)
         self.ctl.speed_tick.connect(self._on_speed)
+        self.ctl.finished.connect(self._on_finished)
+        self.ctl.queue_finished.connect(self._on_queue_finished)
+
+        self.tray = None
+        self.sleep_pc = sleep_pc
+        self._quitting = False
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray = Tray(self, self.ctl, palette["accent"])
+            self.tray.show()
+        self._sched_prev = datetime.now()
+        self._sched_timer = QTimer(self, interval=30_000, timeout=self._scheduler_tick)
+        self._sched_timer.start()
         self.list.primary_clicked.connect(self.ctl.primary)
         self.list.remove_clicked.connect(self.ctl.remove)
 
@@ -184,6 +205,59 @@ class MainWindow(QMainWindow):
         if classify(text) is not LinkKind.INVALID and text != self.smart_bar.input.text().strip():
             self.smart_bar.set_text(text)
 
+    # ---- finishing, scheduling, tray ---------------------------------------
+
+    def _notify(self, title: str, text: str) -> None:
+        if self.tray is not None:
+            self.tray.notify(title, text)
+
+    def _on_finished(self, download_id: int) -> None:
+        d = self.ctl.get(download_id)
+        if d is None or self.isActiveWindow():
+            return  # you're looking at the card already
+        if d.status is Status.FAILED:
+            self._notify(f"{d.filename} failed", d.error or "")
+        else:
+            self._notify(f"{d.filename} finished", f"Saved to {d.folder}")
+
+    def _on_queue_finished(self) -> None:
+        if self.settings.when_done == "notify":
+            self._notify("All downloads finished", "Your queue is empty.")
+        elif self.settings.when_done == "sleep":
+            self._notify("All downloads finished", "Putting the PC to sleep.")
+            self.sleep_pc()
+
+    def _scheduler_tick(self, now: datetime | None = None) -> None:
+        now = now or datetime.now()
+        action = due_action(self.settings.schedule, self._sched_prev, now)
+        self._sched_prev = now
+        if action == "start":
+            self.ctl.start_queue()
+        elif action == "stop":
+            self.ctl.stop_queue()
+
+    def bring_to_front(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def quit_app(self) -> None:
+        self._quitting = True
+        self.close()
+        QApplication.instance().quit()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        busy = any(d.status is Status.DOWNLOADING for d in self.ctl.downloads())
+        if busy and self.tray is not None and not self._quitting:
+            event.ignore()
+            self.hide()
+            self._notify("Still downloading", "Downloader keeps going here. Right-click to quit.")
+            return
+        event.accept()
+        app = QApplication.instance()
+        if not app.quitOnLastWindowClosed():  # the tray keeps the app alive; nothing to wait for
+            app.quit()
+
     # ---- settings and theme -------------------------------------------------
 
     def apply_settings(self, settings: Settings) -> None:
@@ -192,13 +266,13 @@ class MainWindow(QMainWindow):
         settings.save(self.store)
         self.ctl.apply_settings(settings)
         self.queue_panel.set_settings(settings)
+        self.settings_page.set_settings(settings)
         if theme_changed:
             self._apply_theme()
         else:
             self.smart_bar.set_palette(PALETTES[settings.theme])
 
     def _toggle_theme(self) -> None:
-        import dataclasses
         self.apply_settings(dataclasses.replace(
             self.settings, theme="light" if self.settings.theme == "dark" else "dark"))
 
