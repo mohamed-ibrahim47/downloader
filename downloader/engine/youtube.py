@@ -123,18 +123,26 @@ def choose_format(formats: list[dict], quality: str) -> FormatChoice:
     audio = _best_audio(formats)
     heights = sorted({f["height"] for f in formats if _is_video(f)})
     if quality == "Audio" or not heights:
-        return FormatChoice("bestaudio[ext=m4a]/bestaudio", None, _size(audio) if audio else None,
+        return FormatChoice(selector_for("Audio"), None, _size(audio) if audio else None,
                             None if quality == "Audio" else "no video offered · got sound only", "m4a")
     target = int(quality.rstrip("p"))
     lower = [h for h in heights if h <= target]
     height = max(lower) if lower else min(heights)
     video = _best_video_at(formats, height)
-    # H.264 first so the file plays in any player; then any MP4, then whatever exists.
-    selector = (f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]"
-                f"/bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]"
-                f"/bestvideo[height<={height}]+bestaudio/best[height<={height}]")
     note = None if height == target else f"{target}p not offered · got {height}p"
-    return FormatChoice(selector, height, _sum(_size(video), _size(audio) if audio else None), note, "mp4")
+    return FormatChoice(selector_for(f"{height}p"), height,
+                        _sum(_size(video), _size(audio) if audio else None), note, "mp4")
+
+
+def selector_for(quality: str) -> str:
+    """A yt-dlp format string for a quality button; lower heights are taken when needed."""
+    if quality == "Audio":
+        return "bestaudio[ext=m4a]/bestaudio"
+    h = int(quality.rstrip("p"))
+    # H.264 first so the file plays in any player; then any MP4, then whatever exists.
+    return (f"bestvideo[height<={h}][vcodec^=avc1]+bestaudio[ext=m4a]"
+            f"/bestvideo[height<={h}][ext=mp4]+bestaudio[ext=m4a]"
+            f"/bestvideo[height<={h}]+bestaudio/best[height<={h}]/best")
 
 
 def format_options(formats: list[dict]) -> list[FormatOption]:
