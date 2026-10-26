@@ -4,7 +4,7 @@ from __future__ import annotations
 import dataclasses
 from datetime import datetime
 
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QMainWindow,
                                QPushButton, QStackedWidget, QSystemTrayIcon, QToolButton, QVBoxLayout,
@@ -25,40 +25,50 @@ from .queue_panel import QueuePanel
 from .smart_bar import SmartBar
 from .sparkline import Sparkline
 from .theme import APP_ICON, PALETTES, stylesheet
+from .title_bar import TitleBar, make_grips, place_grips
 from .tray import Tray
 
 CHIPS = (("all", "All"), ("active", "Active"), ("queued", "Queued"), ("completed", "Completed"))
 NAV = (("downloads", "list", "Downloads"), ("videos", "video", "Videos and playlists"),
-       ("scheduler", "clock", "Scheduler"), ("settings", "sliders", "Settings"))
+       ("queue", "gauge", "Queue"), ("scheduler", "clock", "Scheduler"), ("settings", "sliders", "Settings"))
 
 
 class MainWindow(QMainWindow):
     def __init__(self, controller: Controller, settings: Settings, store: Store):
         super().__init__()
         self.ctl, self.settings, self.store = controller, settings, store
+        # The app draws its own title bar in the theme's colours (Windows' own can't follow it).
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint
+                            | Qt.WindowSystemMenuHint)
         self.setWindowTitle("Downloader")
         self.resize(1120, 800)
         self.setMinimumSize(900, 640)
         palette = PALETTES[settings.theme]
 
         root = QWidget(objectName="root")
-        row = QHBoxLayout(root)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(0)
-        row.addWidget(self._build_rail())
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.title_bar = TitleBar(self, "Downloader", palette)
+        outer.addWidget(self.title_bar)
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        outer.addLayout(body, 1)
+        body.addWidget(self._build_rail())
 
         self.pages = QStackedWidget()
         self.pages.addWidget(self._build_downloads_page(palette))
-        self.scheduler_page = SchedulerPage(settings, self.apply_settings)
-        self.settings_page = SettingsPage(settings, self.apply_settings)
-        self.pages.addWidget(self.scheduler_page)
-        self.pages.addWidget(self.settings_page)
-        row.addWidget(self.pages, 1)
-
         self.queue_panel = QueuePanel(settings)
         self.queue_panel.changed.connect(self.apply_settings)
-        row.addWidget(self.queue_panel)
+        self.queue_page = self.queue_panel
+        self.scheduler_page = SchedulerPage(settings, self.apply_settings)
+        self.settings_page = SettingsPage(settings, self.apply_settings)
+        for page in (self.queue_page, self.scheduler_page, self.settings_page):
+            self.pages.addWidget(page)
+        body.addWidget(self.pages, 1)
         self.setCentralWidget(root)
+        self._grips = make_grips(self)  # resizing from the border, since there's no system frame
 
         self.ctl.changed.connect(self._on_changed)
         self.ctl.removed.connect(self._on_removed)
@@ -179,7 +189,8 @@ class MainWindow(QMainWindow):
             self.list.set_filter(self.list.mode, youtube_only=key == "videos")
             self._update_chips()
         else:
-            self.pages.setCurrentWidget(self.scheduler_page if key == "scheduler" else self.settings_page)
+            pages = {"queue": self.queue_page, "scheduler": self.scheduler_page, "settings": self.settings_page}
+            self.pages.setCurrentWidget(pages[key])
 
     def _on_changed(self, download_id: int) -> None:
         self.list.update_download(download_id)
@@ -239,6 +250,18 @@ class MainWindow(QMainWindow):
         elif action == "stop":
             self.ctl.stop_queue()
 
+    # ---- frameless window: resize grips along the border --------------------
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        place_grips(self, self._grips)
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        if event.type() == QEvent.WindowStateChange:
+            self.title_bar.window_state_changed()
+            place_grips(self, self._grips)
+        super().changeEvent(event)
+
     def bring_to_front(self) -> None:
         self.showNormal()
         self.raise_()
@@ -290,6 +313,7 @@ class MainWindow(QMainWindow):
         self.theme_button.setAccessibleName(label)
         self.theme_button.setToolTip(label)
         self.sparkline.set_color(p["accent"])
+        self.title_bar.set_palette(p)
         self.smart_bar.set_palette(p)
         self.list.set_palette(p)
         self.setWindowIcon(QIcon(str(APP_ICON)))

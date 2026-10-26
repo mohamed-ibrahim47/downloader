@@ -5,7 +5,7 @@ import dataclasses
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
-                               QProgressBar, QPushButton, QSpinBox, QVBoxLayout)
+                               QProgressBar, QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 from ..engine.paths import disk_usage
 from ..engine.settings import CONNECTION_CHOICES, Settings
@@ -33,16 +33,27 @@ def _segmented(parent, choices: list[tuple[str, object]], current) -> tuple[QHBo
 
 
 class QueuePanel(QFrame):
+    """The Queue page (left menu): how downloads share the connection, and what happens at the end."""
+
     changed = Signal(object)  # Settings
 
     def __init__(self, settings: Settings, parent=None):
-        super().__init__(parent, objectName="queuePanel")
-        self.setFixedWidth(264)
+        super().__init__(parent, objectName="page")
         self._settings = settings
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 22, 20, 22)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(24, 22, 24, 22)
+        outer.setSpacing(18)
+        outer.addWidget(QLabel("Queue", objectName="h1"))
+        intro = QLabel("How many downloads run together, how fast, and what happens when they're done.",
+                       objectName="muted")
+        intro.setWordWrap(True)
+        outer.addWidget(intro)
+        column = QWidget()
+        column.setMaximumWidth(420)
+        layout = QVBoxLayout(column)
+        layout.setContentsMargins(0, 8, 0, 0)
         layout.setSpacing(18)
-        layout.addWidget(QLabel("Queue", objectName="h2"))
+        outer.addWidget(column, 1)
 
         box = QVBoxLayout()
         box.setSpacing(8)
@@ -70,14 +81,6 @@ class QueuePanel(QFrame):
         box.addWidget(_label("Connections per file"))
         row, self._conns = _segmented(self, [(str(n), n) for n in CONNECTION_CHOICES], settings.connections)
         self._conns.buttonClicked.connect(lambda b: self._set(connections=b.property("value")))
-        box.addLayout(row)
-        layout.addLayout(box)
-
-        box = QVBoxLayout()
-        box.setSpacing(8)
-        box.addWidget(_label("Theme"))
-        row, self._themes = _segmented(self, [("Dark", "dark"), ("Light", "light")], settings.theme)
-        self._themes.buttonClicked.connect(lambda b: self._set(theme=b.property("value")))
         box.addLayout(row)
         layout.addLayout(box)
 
@@ -135,9 +138,8 @@ class QueuePanel(QFrame):
     def set_settings(self, settings: Settings) -> None:
         """Reflect settings changed elsewhere (the rail's theme button, the Settings page)."""
         self._settings = settings
-        for group, value in ((self._conns, settings.connections), (self._themes, settings.theme)):
-            for b in group.buttons():
-                b.setChecked(b.property("value") == value)
+        for b in self._conns.buttons():
+            b.setChecked(b.property("value") == settings.connections)
         self._count.setText(str(settings.max_active))
         self._refresh_disk()
 

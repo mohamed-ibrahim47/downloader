@@ -38,6 +38,8 @@ def test_fmt_duration():
     from downloader.ui.formatting import fmt_duration
     assert fmt_duration(None) == ""
     assert fmt_duration(596) == "9 min 56 s"
+    assert fmt_duration(2700) == "45 min"
+    assert fmt_duration(42) == "42 s"
     assert fmt_duration(34_860) == "9 h 41 min"
 
 

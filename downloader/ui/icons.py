@@ -14,7 +14,8 @@ ICON_PATHS = {
     "playlist": "M4 6h12M4 12h12M4 18h8M17 15l4 3-4 3z",
     "file": "M6 3h8l4 4v14H6zM14 3v4h4",
     "folder": "M3 6h6l2 2h10v11H3z",
-    "clock": "M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M12 7v5l3 2",
+    "gauge": "M4 17a8 8 0 1 1 16 0M12 17l4-5M7.5 9.5l1 1M12 7v1.5",
+    "clock":"M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M12 7v5l3 2",
     "sliders": "M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4",
     "link": "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
     "archive": "M4 4h16v4H4zM5 8v12h14V8M10 12h4",
@@ -27,6 +28,11 @@ ICON_PATHS = {
     "sun": "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4"
            "M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
     "moon": "M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z",
+    # window controls for the custom title bar
+    "win_min": "M5 12h14",
+    "win_max": "M5 5h14v14H5z",
+    "win_restore": "M8 8h11v11H8zM5 16V5h11",
+    "win_close": "M6 6l12 12M18 6L6 18",
 }
 
 

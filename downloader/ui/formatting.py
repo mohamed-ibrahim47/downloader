@@ -12,8 +12,11 @@ def plain_tip(text: str) -> str:
 def fmt_duration(seconds: int | None) -> str:
     if not seconds:
         return ""
+    if seconds < 60:
+        return f"{seconds} s"
     if seconds < 3600:
-        return f"{seconds // 60} min {seconds % 60} s"
+        m, s = divmod(seconds, 60)
+        return f"{m} min {s} s" if s else f"{m} min"
     return f"{seconds // 3600} h {(seconds % 3600) // 60} min"
 
 

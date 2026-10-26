@@ -52,6 +52,13 @@ def stylesheet(theme: str) -> str:
 QMainWindow, QWidget#root, QWidget#page {{ background: {c['bg']}; }}
 QToolTip {{ background: {c['surface']}; color: {c['text']}; border: 1px solid {c['border']}; padding: 4px; }}
 
+QWidget#root {{ border: 1px solid {c['railBorder']}; }}
+QFrame#titleBar {{ background: {c['rail']}; border: none; border-bottom: 1px solid {c['railBorder']}; }}
+QLabel#appTitle {{ font-size: 12px; font-weight: 600; color: {c['text']}; }}
+QToolButton#minButton, QToolButton#maxButton, QToolButton#closeButton {{ border: none; border-radius: 0;
+    background: transparent; }}
+QToolButton#minButton:hover, QToolButton#maxButton:hover {{ background: {c['navActive']}; }}
+QToolButton#closeButton:hover {{ background: #C42B1C; }}
 QFrame#rail {{ background: {c['rail']}; border-right: 1px solid {c['railBorder']}; }}
 QLabel#logo {{ background: {c['accent']}; border-radius: 12px; }}
 QToolButton#railButton {{ background: transparent; border: none; border-radius: 12px; }}
@@ -123,7 +130,9 @@ QProgressBar#diskBar {{ background: {c['track']}; border: none; border-radius: 2
 QProgressBar#diskBar::chunk {{ background: {c['muted']}; border-radius: 2px; }}
 
 QDialog {{ background: {c['bg']}; }}
-QListWidget {{ background: {c['surface']}; border: 1px solid {c['cardBorder']}; border-radius: 10px; }}
+QListWidget {{ background: {c['surface']}; border: 1px solid {c['cardBorder']}; border-radius: 10px; padding: 4px; }}
+QListWidget::item {{ padding: 7px 6px; border-radius: 6px; }}
+QListWidget::item:hover {{ background: {c['surface2']}; }}
 QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
 QScrollBar::handle:vertical {{ background: {c['border']}; border-radius: 4px; min-height: 30px; }}
