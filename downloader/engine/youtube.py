@@ -14,7 +14,6 @@ from .ratelimit import TokenBucket
 
 QUALITIES = ("1080p", "720p", "480p", "Audio")
 MB_PER_MINUTE = {"1080p": 11.2, "720p": 8.4, "480p": 4.6, "Audio": 1.0}
-MEDIA_EXTS = (".mp4", ".m4a", ".mp3", ".webm", ".mkv", ".opus")
 
 
 @dataclass
@@ -208,10 +207,14 @@ class YouTubeJob:
         self._thread: threading.Thread | None = None
         self._base = 0
         self._last_progress = 0.0
+        self._final_path: str | None = None
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self.run, name=f"youtube-{self.download.id}", daemon=True)
         self._thread.start()
+
+    def signal_pause(self) -> None:
+        self._pause.set()
 
     def pause(self) -> None:
         self._pause.set()
@@ -231,6 +234,9 @@ class YouTubeJob:
             "ffmpeg_location": imageio_ffmpeg.get_ffmpeg_exe(),
             "continuedl": True,
             "progress_hooks": [self._hook],
+            # yt-dlp tells us the finished file's path (after merging/converting); no guessing.
+            "post_hooks": [self._on_final_path],
+            "updatetime": False,
             "windowsfilenames": True,
         }
         if self._limiter.rate:
@@ -291,16 +297,13 @@ class YouTubeJob:
             d.status, d.finished_at = Status.COMPLETED, time.time()
         self._on_finish(d)
 
+    def _on_final_path(self, path: str) -> None:
+        self._final_path = path
+
     def _finish_names(self) -> None:
         d = self.download
-        stem = Path(d.filename).stem
-        found = [p for p in Path(d.folder).glob(f"{_glob_escape(stem)}.*") if p.suffix.lower() in MEDIA_EXTS]
-        if found:
-            final = max(found, key=lambda p: p.stat().st_mtime)
+        if self._final_path and Path(self._final_path).exists():
+            final = Path(self._final_path)
             d.filename = final.name
             d.size = final.stat().st_size
             d.downloaded = d.size
-
-
-def _glob_escape(text: str) -> str:
-    return re.sub(r"([\[\]*?])", r"[\1]", text)

@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from downloader.engine.models import Download, Kind, Status
@@ -162,6 +164,110 @@ def test_remove_keeps_finished_file_unless_asked(env):
     q.remove(b.id, delete_file=True)
     assert a.target_path.exists()
     assert not b.target_path.exists()
+
+
+def test_start_saves_downloading_status(env):
+    # Review I2: a crash must find "downloading" in the store, so the item comes back Paused.
+    q, jobs, _, store, tmp = env
+    d = q.add(_d(tmp))
+    assert store.get(d.id).status is Status.DOWNLOADING
+
+
+def test_pump_starts_waiting_items_loaded_from_store(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    for i in range(4):
+        store.add(_d(tmp_path, i))  # QUEUED
+    started = []
+    q = DownloadQueue(store, lambda d, p, f: type("J", (), {"start": lambda s: started.append(d.id),
+                                                          "pause": lambda s: None, "download": d})(),
+                      max_active=3)
+    q.pump()
+    assert len(started) == 3
+
+
+def test_add_many_starts_up_to_limit(env):
+    q, jobs, events, store, tmp = env
+    ds = q.add_many([_d(tmp, i) for i in range(10)])
+    assert len(store.all()) == 10
+    assert len(q.active_ids()) == 3
+    assert all(d.id is not None for d in ds)
+
+
+def test_resume_one_item_while_held_starts_it(env):
+    # Review I9: "Pause all", then Resume on one card must start that card.
+    q, jobs, _, _, tmp = env
+    d = q.add(_d(tmp))
+    q.pause_all()
+    q.resume(d.id)
+    assert d.id in q.active_ids()
+
+
+def test_add_while_held_starts_it(env):
+    q, jobs, _, _, tmp = env
+    q.pause_all()
+    d = q.add(_d(tmp))
+    assert d.id in q.active_ids()
+
+
+def test_pause_all_signals_every_job_before_waiting(tmp_path):
+    # Review I7: stopping N downloads takes as long as the slowest, not the sum.
+    store = Store(tmp_path / "db.sqlite")
+
+    class SlowJob:
+        def __init__(self, d, p, f):
+            self.download, self._finish, self.signalled = d, f, None
+
+        def start(self):
+            pass
+
+        def signal_pause(self):
+            self.signalled = time.monotonic()
+
+        def pause(self):
+            if self.signalled is None:
+                self.signal_pause()
+            time.sleep(max(0.0, self.signalled + 0.3 - time.monotonic()))
+            self.download.status = Status.PAUSED
+            self._finish(self.download)
+
+    q = DownloadQueue(store, SlowJob, max_active=3)
+    for i in range(3):
+        q.add(_d(tmp_path, i))
+    t0 = time.monotonic()
+    q.pause_all()
+    assert time.monotonic() - t0 < 0.6
+
+
+def test_unique_name_avoids_queue_and_disk(env):
+    # Review C1: two links ending in the same name must not share a file.
+    q, jobs, _, _, tmp = env
+    q.add(_d(tmp, 1))  # f1.bin is now taken by a download
+    assert q.unique_name(str(tmp), "f1.bin") == "f1 (2).bin"
+    (tmp / "x.zip.part").write_bytes(b"stale")
+    assert q.unique_name(str(tmp), "x.zip") == "x (2).zip"
+    assert q.unique_name(str(tmp), "free.zip") == "free.zip"
+
+
+def test_unique_name_by_stem_for_videos(env):
+    # Review I4: "Song" as video and as audio must not share a stem.
+    q, jobs, _, _, tmp = env
+    (tmp / "Song.mp4").write_bytes(b"v")
+    assert q.unique_name(str(tmp), "Song.m4a", by_stem=True) == "Song (2).m4a"
+
+
+def test_remove_youtube_leftovers(env):
+    # Review I5: yt-dlp's piece files go too; other files with similar names stay.
+    q, jobs, _, _, tmp = env
+    d = _d(tmp)
+    d.kind, d.filename = Kind.VIDEO, "Clip.mp4"
+    q.add(d)
+    leftovers = ["Clip.f137.mp4.part", "Clip.f140.m4a", "Clip.f137.mp4.ytdl", "Clip.f137.mp4.part-Frag3",
+                 "Clip.temp.mp4"]
+    keep = ["Clip (2).mp4", "Clip.mp4", "Clipper.f137.mp4.part"]
+    for name in leftovers + keep:
+        (tmp / name).write_bytes(b"x")
+    q.remove(d.id)
+    assert sorted(p.name for p in tmp.iterdir() if p.suffix != ".sqlite" and "sqlite" not in p.name) == sorted(keep)
 
 
 def test_loads_existing_downloads_from_store(tmp_path):

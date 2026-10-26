@@ -79,6 +79,33 @@ def test_friendly_error(raw, expected):
     assert friendly_error(raw) == expected
 
 
+def _job(tmp_path, filename="Song.m4a"):
+    from downloader.engine.models import Download, Kind
+    from downloader.engine.ratelimit import TokenBucket
+    from downloader.engine.youtube import YouTubeJob
+    d = Download(url="u", kind=Kind.VIDEO, filename=filename, folder=str(tmp_path), format_selector="x")
+    return YouTubeJob(d, TokenBucket(None), lambda _d: None, lambda _d: None)
+
+
+def test_final_path_comes_from_ytdlp_not_a_guess(tmp_path):
+    # Review I4: a newer "Song.mp4" next to our "Song.m4a" must not be taken for ours.
+    job = _job(tmp_path)
+    opts = job._options()
+    assert opts["updatetime"] is False
+    (tmp_path / "Song.m4a").write_bytes(b"a" * 10)
+    (tmp_path / "Song.mp4").write_bytes(b"v" * 99)  # newer, same stem
+    opts["post_hooks"][0](str(tmp_path / "Song.m4a"))
+    job._finish_names()
+    assert job.download.filename == "Song.m4a"
+    assert job.download.size == 10
+
+
+def test_job_can_be_signalled_without_waiting(tmp_path):
+    job = _job(tmp_path)
+    job.signal_pause()
+    assert job._pause.is_set()
+
+
 @pytest.mark.network
 @pytest.mark.skipif(os.environ.get("RUN_NETWORK") != "1", reason="set RUN_NETWORK=1")
 def test_fetch_info_real_video():

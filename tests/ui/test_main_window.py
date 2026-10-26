@@ -35,10 +35,11 @@ def _d(status, n, **kw):
 def win(tmp_path, qtbot, monkeypatch):
     monkeypatch.setattr(smart_bar, "probe", lambda url: FileInfo(url, "a.zip", 10, True))
     store = Store(tmp_path / "db.sqlite")
+    store.add(_d(Status.QUEUED, 0))  # oldest waiting item: starts at launch
     store.add(_d(Status.QUEUED, 1))
     store.add(_d(Status.PAUSED, 2, downloaded=400_000))
     store.add(_d(Status.COMPLETED, 3, downloaded=1_000_000, finished_at=time.time()))
-    settings = Settings(folder_general=str(tmp_path))
+    settings = Settings(folder_general=str(tmp_path), max_active=1)
     ctl = Controller(store, settings, job_factory=IdleJob)
     w = MainWindow(ctl, settings, store)
     qtbot.addWidget(w)
@@ -65,16 +66,16 @@ def test_theme_toggle_switches_and_persists(win, qtbot):
 
 def test_chips_show_counts(win):
     texts = [b.text() for b in win.findChildren(QPushButton, "chip")]
-    assert texts == ["All 3", "Active 0", "Queued 1", "Completed 1"]
+    assert texts == ["All 4", "Active 1", "Queued 1", "Completed 1"]
 
 
 def test_all_hides_completed_behind_row(win):
     names = sorted(c.download.filename for c in _visible_cards(win))
-    assert names == ["1.zip", "2.zip"]
+    assert names == ["0.zip", "1.zip", "2.zip"]
     row = win.findChild(QPushButton, "completedRow")
     assert row.text().startswith("Completed today · 1 file · 1.0 MB")
     row.click()
-    assert sorted(c.download.filename for c in _visible_cards(win)) == ["1.zip", "2.zip", "3.zip"]
+    assert sorted(c.download.filename for c in _visible_cards(win)) == ["0.zip", "1.zip", "2.zip", "3.zip"]
 
 
 def test_chips_filter_cards(win, qtbot):
@@ -87,7 +88,7 @@ def test_chips_filter_cards(win, qtbot):
 def test_new_download_appears_as_card(win, qtbot):
     win.ctl.add_file(FileInfo("https://e.com/new.zip", "new.zip", 5, True))
     qtbot.waitUntil(lambda: "new.zip" in [c.download.filename for c in _visible_cards(win)], timeout=2000)
-    assert _chip(win, "All").text() == "All 4"
+    assert _chip(win, "All").text() == "All 5"
 
 
 def test_clipboard_link_fills_bar(win, qtbot):

@@ -116,6 +116,41 @@ def test_primary_on_downloading_pauses(ctl, qtbot):
     qtbot.waitUntil(lambda: d.status is Status.PAUSED, timeout=2000)
 
 
+def test_two_same_named_files_get_different_names(ctl):
+    # Review C1: https://a/one/setup.zip and https://a/two/setup.zip queued together.
+    ctl.add_file(FileInfo("https://a.com/one/setup.zip", "setup.zip", 10, True))
+    ctl.add_file(FileInfo("https://a.com/two/setup.zip", "setup.zip", 10, True))
+    assert sorted(d.filename for d in ctl.downloads()) == ["setup (2).zip", "setup.zip"]
+
+
+def test_video_and_audio_of_same_title_dont_share_stem(ctl):
+    ctl.add_video(VideoInfo("u", "Song", "", None, []), FormatChoice("s", 1080, None, None, "mp4"))
+    ctl.add_video(VideoInfo("u", "Song", "", None, []), FormatChoice("s", None, None, None, "m4a"))
+    assert sorted(d.filename for d in ctl.downloads()) == ["Song (2).m4a", "Song.mp4"]
+
+
+def test_big_playlist_adds_quickly(ctl):
+    # Review I6: 250 videos used to freeze the window for ~25 s.
+    import time
+    info = PlaylistInfo("u", "Big", [PlaylistEntry(i, f"u{i}", f"Video {i}", 60) for i in range(1, 251)])
+    t0 = time.monotonic()
+    ctl.add_playlist(info, "720p", picked=list(range(1, 251)))
+    assert time.monotonic() - t0 < 3
+    assert len(ctl.downloads()) == 250
+    assert ctl.downloads()[-1].filename == "001 - Video 1.mp4"
+
+
+def test_waiting_items_start_on_launch(tmp_path, qapp):
+    # Review I2: items left waiting when the app closed start again when it opens.
+    store = Store(tmp_path / "db.sqlite")
+    from downloader.engine.models import Download
+    store.add(Download(url="https://e.com/a", kind=Kind.FILE, filename="a.zip", folder=str(tmp_path)))
+    c = Controller(store, Settings(folder_general=str(tmp_path)), job_factory=IdleJob)
+    assert c.downloads()[0].status is Status.DOWNLOADING
+    c.shutdown()
+    store.close()
+
+
 def test_apply_settings_sets_limit_and_concurrency(ctl):
     s = Settings(max_active=1, speed_limit_on=True, speed_limit_kbps=100)
     ctl.apply_settings(s)

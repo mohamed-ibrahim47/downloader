@@ -14,6 +14,7 @@ def main(argv: list[str] | None = None) -> int:
     from .engine.store import Store
     from .ui.controller import Controller
     from .ui.main_window import MainWindow
+    from .ui.single_instance import SingleInstance, default_name
     from .ui.theme import load_fonts
 
     if sys.platform == "win32":
@@ -23,11 +24,16 @@ def main(argv: list[str] | None = None) -> int:
 
     app = QApplication.instance() or QApplication([sys.argv[0], *argv])
     app.setApplicationName("Downloader")
+    home = data_home()
+    guard = SingleInstance(default_name(str(home)))
+    if not guard.try_lock():
+        return 0  # already running: that copy has been asked to show its window
     load_fonts()
-    store = Store(data_home() / "downloader.db")
+    store = Store(home / "downloader.db")
     settings = Settings.load(store)
     controller = Controller(store, settings)
     window = MainWindow(controller, settings, store)
+    guard.activated.connect(window.bring_to_front)
     # With a tray icon, closing the window while downloading keeps the app running.
     app.setQuitOnLastWindowClosed(window.tray is None)
     window.show()

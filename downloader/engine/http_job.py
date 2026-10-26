@@ -65,6 +65,10 @@ class HttpJob:
         self._thread = threading.Thread(target=self.run, name=f"download-{self.download.id}", daemon=True)
         self._thread.start()
 
+    def signal_pause(self) -> None:
+        """Ask to stop without waiting (pausing many downloads: signal all, then wait)."""
+        self._pause.set()
+
     def pause(self) -> None:
         self._pause.set()
         if self._thread and self._thread is not threading.current_thread():

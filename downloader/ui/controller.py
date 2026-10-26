@@ -12,7 +12,7 @@ from PySide6.QtGui import QDesktopServices
 
 from ..engine.http_job import HttpJob
 from ..engine.models import Download, Kind, Status
-from ..engine.paths import safe_filename, unique_path
+from ..engine.paths import safe_filename
 from ..engine.probe import FileInfo
 from ..engine.queue import DownloadQueue
 from ..engine.ratelimit import TokenBucket
@@ -62,6 +62,9 @@ class Controller(QObject):
         self._flush_timer.start()
         self._speed_timer = QTimer(self, interval=500, timeout=self._tick)
         self._speed_timer.start()
+        # Downloads left waiting when the app last closed carry on. (Those that were running
+        # come back Paused, from the store, and wait for the user.)
+        self.queue.pump()
 
     # ---- jobs ---------------------------------------------------------------
 
@@ -90,8 +93,9 @@ class Controller(QObject):
 
     def add_file(self, info: FileInfo, folder: str | None = None) -> Download:
         folder = folder or self.settings.folder_general
-        d = Download(url=info.url, kind=Kind.FILE, filename=info.filename, folder=folder, size=info.size,
-                     resumable=info.resumable, connections=self.settings.connections)
+        d = Download(url=info.url, kind=Kind.FILE, filename=self.queue.unique_name(folder, info.filename),
+                     folder=folder, size=info.size, resumable=info.resumable,
+                     connections=self.settings.connections)
         return self.queue.add(d)
 
     def add_video(self, info: VideoInfo, choice: FormatChoice | FormatOption, folder: str | None = None,
@@ -104,7 +108,7 @@ class Controller(QObject):
         else:
             quality = f"{choice.height}p" if choice.height else "Audio"
             ext, note, audio_format = choice.ext, choice.note, choice.audio_format
-        name = unique_path(Path(folder), f"{safe_filename(info.title)}.{ext}").name
+        name = self.queue.unique_name(folder, f"{safe_filename(info.title)}.{ext}", by_stem=True)
         d = Download(url=info.url, kind=Kind.VIDEO, filename=name, folder=folder, size=choice.size,
                      resumable=True, quality=quality, format_selector=choice.selector, note=note,
                      audio_format=audio_format, title=info.title,
@@ -115,23 +119,26 @@ class Controller(QObject):
         return d
 
     def add_playlist(self, info: PlaylistInfo, quality: str, picked: list[int]) -> list[Download]:
-        folder = Path(self.settings.folder_playlist) / safe_filename(info.title)
+        folder = str(Path(self.settings.folder_playlist) / safe_filename(info.title))
         ext = "m4a" if quality == "Audio" else "mp4"
         width = 3 if len(info.entries) >= 100 else 2
-        added = []
+        batch: list[Download] = []
+        names: set[str] = set()
         for e in info.entries:
             if e.index not in picked:
                 continue
             title = safe_filename(e.title)
             base = f"{e.index:0{width}d} - {title}" if self.settings.number_playlist_files else title
-            name = unique_path(folder, f"{base}.{ext}").name
+            name = self.queue.unique_name(folder, f"{base}.{ext}", by_stem=True)
+            while Path(name).stem.lower() in names:  # two videos with the same title in this batch
+                name = self.queue.unique_name(folder, f"{Path(name).stem} (2).{ext}", by_stem=True)
+            names.add(Path(name).stem.lower())
             size = round(e.duration / 60 * MB_PER_MINUTE[quality] * 1_000_000) if e.duration else None
-            d = Download(url=e.url, kind=Kind.PLAYLIST_ITEM, filename=name, folder=str(folder), size=size,
-                         resumable=True, quality=quality, format_selector=selector_for(quality),
-                         title=e.title, playlist_title=info.title, playlist_index=e.index,
-                         subtitles=self.settings.subtitles)
-            added.append(self.queue.add(d))
-        return added
+            batch.append(Download(url=e.url, kind=Kind.PLAYLIST_ITEM, filename=name, folder=folder, size=size,
+                                  resumable=True, quality=quality, format_selector=selector_for(quality),
+                                  title=e.title, playlist_title=info.title, playlist_index=e.index,
+                                  subtitles=self.settings.subtitles))
+        return self.queue.add_many(batch)
 
     # ---- acting -------------------------------------------------------------
 
