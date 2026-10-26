@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication.instance() or QApplication([sys.argv[0], *argv])
     app.setApplicationName("Downloader")
     home = data_home()
-    guard = SingleInstance(default_name(str(home)))
+    guard = SingleInstance(default_name(str(home)), str(home / "downloader.lock"))
     if not guard.try_lock():
         return 0  # already running: that copy has been asked to show its window
     load_fonts()

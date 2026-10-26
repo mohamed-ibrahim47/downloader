@@ -263,7 +263,8 @@ def test_remove_youtube_leftovers(env):
     q.add(d)
     leftovers = ["Clip.f137.mp4.part", "Clip.f140.m4a", "Clip.f137.mp4.ytdl", "Clip.f137.mp4.part-Frag3",
                  "Clip.temp.mp4"]
-    keep = ["Clip (2).mp4", "Clip.mp4", "Clipper.f137.mp4.part"]
+    keep = ["Clip (2).mp4", "Clip.mp4", "Clipper.f137.mp4.part",
+            "Clip.f1.txt", "Clip.notes.part", "Clip.temp.docx", "Clip.backup.ytdl"]  # the user's own files
     for name in leftovers + keep:
         (tmp / name).write_bytes(b"x")
     q.remove(d.id)

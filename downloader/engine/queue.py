@@ -20,8 +20,11 @@ class Job(Protocol):
 JobFactory = Callable[[Download, Callable[[Download], None], Callable[[Download], None]], Job]
 
 MEDIA_EXTS = (".mp4", ".m4a", ".mp3", ".webm", ".mkv", ".opus")
-# What yt-dlp leaves next to `<stem>.<ext>` while working: format pieces, partials, fragments, state.
-_LEFTOVER = re.compile(r"^(f\d+[^.]*\.\w+(\.part(-Frag\d+)?|\.ytdl)?|temp\.\w+|\w+\.part(-Frag\d+)?|\w+\.ytdl)$")
+# Exactly what yt-dlp leaves next to `<stem>.<ext>` while working, always ending in a media type:
+# format pieces (f137.mp4 / .part / .part-Frag3 / .ytdl), the merge's temp.mp4, mp4.part, mp4.ytdl.
+_MEDIA = r"(mp4|m4a|webm|mkv|opus|mp3)"
+_LEFTOVER = re.compile(
+    rf"^(f\d+(-\d+)?\.{_MEDIA}(\.part(-Frag\d+)?|\.ytdl)?|temp\.{_MEDIA}|{_MEDIA}\.part(-Frag\d+)?|{_MEDIA}\.ytdl)$")
 
 
 def _noop(*_args) -> None:
