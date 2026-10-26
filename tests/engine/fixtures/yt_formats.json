@@ -1,0 +1,13 @@
+[
+  {"format_id": "sb0", "ext": "mhtml", "vcodec": "none", "acodec": "none", "format_note": "storyboard"},
+  {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2", "abr": 129.5, "filesize": 3400000},
+  {"format_id": "251", "ext": "webm", "vcodec": "none", "acodec": "opus", "abr": 135.1, "filesize": 3600000},
+  {"format_id": "160", "ext": "mp4", "vcodec": "avc1.4d400c", "acodec": "none", "height": 144, "filesize": 2000000},
+  {"format_id": "18", "ext": "mp4", "vcodec": "avc1.42001E", "acodec": "mp4a.40.2", "height": 360, "filesize": 18900000},
+  {"format_id": "134", "ext": "mp4", "vcodec": "avc1.4d401e", "acodec": "none", "height": 360, "filesize": 15500000},
+  {"format_id": "135", "ext": "mp4", "vcodec": "avc1.4d401f", "acodec": "none", "height": 480, "filesize": 22600000},
+  {"format_id": "136", "ext": "mp4", "vcodec": "avc1.4d401f", "acodec": "none", "height": 720, "filesize": 44800000},
+  {"format_id": "247", "ext": "webm", "vcodec": "vp9", "acodec": "none", "height": 720, "filesize": 41000000},
+  {"format_id": "137", "ext": "mp4", "vcodec": "avc1.640028", "acodec": "none", "height": 1080, "filesize_approx": 93000000},
+  {"format_id": "271", "ext": "webm", "vcodec": "vp9", "acodec": "none", "height": 1440, "filesize": 178600000}
+]

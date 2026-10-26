@@ -18,6 +18,10 @@ class TokenBucket:
         self._tokens = float(rate_bps or 0)
         self._last = time.monotonic()
 
+    @property
+    def rate(self) -> int | None:
+        return self._rate
+
     def set_rate(self, rate_bps: int | None) -> None:
         with self._lock:
             self._rate = rate_bps

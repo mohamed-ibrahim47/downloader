@@ -1,0 +1,97 @@
+import json
+import os
+from pathlib import Path
+
+import pytest
+
+from downloader.engine.youtube import (
+    PlaylistEntry, PlaylistInfo, VideoInfo, choose_format, estimate_playlist_size,
+    fetch_info, format_options, friendly_error,
+)
+
+FORMATS = json.loads((Path(__file__).parent / "fixtures" / "yt_formats.json").read_text())
+
+
+def test_choose_720_exact():
+    c = choose_format(FORMATS, "720p")
+    assert c.height == 720
+    assert "height<=720" in c.selector
+    # H.264 first: AV1/VP9 in an .mp4 won't play in the stock Windows player.
+    assert c.selector.startswith("bestvideo[height<=720][vcodec^=avc1]+bestaudio[ext=m4a]/")
+    assert c.size == 44_800_000 + 3_400_000
+    assert c.note is None
+    assert c.ext == "mp4"
+
+
+def test_choose_falls_back_lower():
+    no_hd = [f for f in FORMATS if (f.get("height") or 0) < 1080]
+    c = choose_format(no_hd, "1080p")
+    assert c.height == 720
+    assert c.note == "1080p not offered · got 720p"
+
+
+def test_choose_uses_approx_size():
+    assert choose_format(FORMATS, "1080p").size == 93_000_000 + 3_400_000
+
+
+def test_choose_audio_is_m4a():
+    c = choose_format(FORMATS, "Audio")
+    assert c.ext == "m4a"
+    assert c.height is None
+    assert c.size == 3_400_000
+    assert "bestaudio" in c.selector
+
+
+def test_choose_lowest_when_all_above_target():
+    only_hd = [f for f in FORMATS if f.get("height") in (None, 1080)]
+    assert choose_format(only_hd, "480p").height == 1080
+
+
+def test_format_options_order():
+    opts = format_options(FORMATS)
+    assert [o.id for o in opts] == ["v1440", "v1080", "v720", "v480", "v360", "v144", "m4a", "mp3"]
+    assert opts[0].kind.startswith("WebM")
+    assert opts[2].kind.startswith("MP4")
+    assert opts[-1].audio_format == "mp3"
+    assert opts[2].size == 44_800_000 + 3_400_000
+
+
+def test_estimate_playlist_size():
+    entries = [PlaylistEntry(1, "u1", "a", 3600), PlaylistEntry(2, "u2", "b", 3600)]
+    assert estimate_playlist_size(entries, "720p") == 1_008_000_000
+
+
+def test_estimate_playlist_size_unknown_durations():
+    assert estimate_playlist_size([PlaylistEntry(1, "u", "a", None)], "720p") is None
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("ERROR: unable to download video data: HTTP Error 403: Forbidden",
+     "server refused (403) · link may have expired"),
+    ("ERROR: [youtube] abc: Video unavailable", "this video is unavailable or private"),
+    ("ERROR: [youtube] abc: Private video. Sign in if you've been granted access",
+     "this video is unavailable or private"),
+    ("ERROR: [youtube] abc: Sign in to confirm your age", "YouTube asks for a sign-in to watch this video"),
+    ("ERROR: <urlopen error [Errno 11001] getaddrinfo failed>", "connection lost · check your internet"),
+    ("ERROR: something odd happened\nmore", "YouTube error: something odd happened"),
+])
+def test_friendly_error(raw, expected):
+    assert friendly_error(raw) == expected
+
+
+@pytest.mark.network
+@pytest.mark.skipif(os.environ.get("RUN_NETWORK") != "1", reason="set RUN_NETWORK=1")
+def test_fetch_info_real_video():
+    info = fetch_info("https://www.youtube.com/watch?v=aqz-KE-bpKQ&list=PLxxx")
+    assert isinstance(info, VideoInfo)
+    assert "Big Buck Bunny" in info.title
+    assert choose_format(info.formats, "480p").height == 480
+
+
+@pytest.mark.network
+@pytest.mark.skipif(os.environ.get("RUN_NETWORK") != "1", reason="set RUN_NETWORK=1")
+def test_fetch_info_real_playlist():
+    info = fetch_info("https://www.youtube.com/playlist?list=PLRqwX-V7Uu6ZiZxtDDRCi6uhfTH4FilpH")
+    assert isinstance(info, PlaylistInfo)
+    assert len(info.entries) > 3
+    assert info.entries[0].index == 1
