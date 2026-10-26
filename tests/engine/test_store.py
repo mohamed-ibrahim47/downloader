@@ -1,3 +1,5 @@
+import time
+
 from downloader.engine.models import Download, Kind, Segment, Status
 from downloader.engine.store import Store
 
@@ -56,6 +58,25 @@ def test_save_segments(tmp_path):
     store.add(d)
     store.save_segments(d.id, [Segment(0, 0, 9, 9)])
     assert store.get(d.id).segments == [Segment(0, 0, 9, 9)]
+
+
+def test_save_segments_updates_downloaded(tmp_path):
+    # Review I1: after a crash the card must show the saved progress.
+    store = Store(tmp_path / "db.sqlite")
+    d = _download(size=100)
+    store.add(d)
+    store.save_segments(d.id, [Segment(0, 0, 49, 20), Segment(1, 50, 99, 15)])
+    assert store.get(d.id).downloaded == 35
+
+
+def test_add_many_is_one_fast_transaction(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    ds = [_download(url=f"https://e.com/{i}") for i in range(250)]
+    t0 = time.monotonic()
+    ids = store.add_many(ds)
+    assert time.monotonic() - t0 < 2
+    assert ids == [d.id for d in ds] and len(set(ids)) == 250
+    assert len(store.all()) == 250
 
 
 def test_settings_roundtrip(tmp_path):

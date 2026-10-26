@@ -103,8 +103,10 @@ class HttpJob:
             folder.mkdir(parents=True, exist_ok=True)
             if not d.segments:
                 d.segments = plan_segments(d.size, d.connections, d.resumable)
-            if not d.resumable or not d.part_path.exists():
-                # Without range support a download can only start over.
+            fresh = not any(s.done for s in d.segments)
+            if not d.resumable or fresh or not d.part_path.exists():
+                # Nothing saved yet (a stale .part of the same name is not ours), or no range
+                # support: start over from an empty file.
                 for s in d.segments:
                     s.done = 0
                 self._reset_part()
@@ -138,6 +140,8 @@ class HttpJob:
 
     def _complete(self) -> None:
         d = self.download
+        if not all(s.finished for s in d.segments):
+            raise DownloadError("download stopped before the end · press Retry to continue")
         if d.size is None:
             d.size = sum(s.done for s in d.segments)
         final = unique_path(d.target_path.parent, d.filename)
@@ -196,6 +200,7 @@ class HttpJob:
             while not self._stopped():
                 if not self._acquire():
                     return
+                before = seg.done
                 try:
                     self._fetch(session, seg)
                     return
@@ -217,9 +222,14 @@ class HttpJob:
                 except OSError as e:
                     self._fail(DISK_FULL if e.errno == errno.ENOSPC else cant_write(self.download.folder))
                     return
+                except Exception as e:  # never let a connection die silently
+                    self._fail(f"unexpected problem: {e}")
+                    return
                 finally:
                     self._release()
-                time.sleep(self._backoff[attempt])
+                if seg.done > before:
+                    attempt = 0  # it was making progress: a new drop gets fresh retries
+                self._pause.wait(self._backoff[attempt])  # pausing cuts the wait short
                 attempt += 1
         finally:
             session.close()

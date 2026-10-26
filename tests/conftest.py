@@ -16,10 +16,13 @@ class _Entry:
     length: bool = True
     status: int = 200
     fail_times: int = 0
+    fail_without_data: bool = False  # failures send nothing at all (no progress)
     disposition: str | None = None
     delay_per_chunk: float = 0.0
     max_conns: int = 0  # >0: answer 429 when more GETs than this are in flight
     active: int = 0
+    redirect_to: str | None = None  # answer 302 to this path
+    gzip: bool = False  # compress the body (as some servers do even for 206)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -36,6 +39,12 @@ class _Handler(BaseHTTPRequestHandler):
         owner.requests.append((self.command, self.path, rng))
         if entry is None:
             self.send_response(404)
+            self.end_headers()
+            return
+        if entry.redirect_to:
+            self.send_response(302)
+            self.send_header("Location", entry.redirect_to)
+            self.send_header("Content-Length", "0")
             self.end_headers()
             return
         status_now = entry.status
@@ -69,8 +78,14 @@ class _Handler(BaseHTTPRequestHandler):
             end = int(m.group(2)) if m.group(2) else len(data) - 1
             status = 206
         part = data[start:end + 1]
+        accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "")
+        if entry.gzip and accepts_gzip:
+            import gzip as _gzip
+            part = _gzip.compress(part)
 
         self.send_response(status)
+        if entry.gzip and accepts_gzip:
+            self.send_header("Content-Encoding", "gzip")
         if entry.ranges:
             self.send_header("Accept-Ranges", "bytes")
         if status == 206:
@@ -90,7 +105,8 @@ class _Handler(BaseHTTPRequestHandler):
                 fail = True
         if fail:
             # Send half and hang up: the client sees a broken connection.
-            self.wfile.write(part[: len(part) // 2])
+            if not entry.fail_without_data:
+                self.wfile.write(part[: len(part) // 2])
             self.wfile.flush()
             self.close_connection = True
             return

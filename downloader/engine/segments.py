@@ -8,8 +8,10 @@ def plan_segments(size: int | None, connections: int, resumable: bool,
                   min_part: int = 1_048_576) -> list[Segment]:
     if size is None:
         return [Segment(0, 0, -1)]
-    if not resumable or size <= 0:
-        return [Segment(0, 0, max(size, 0) - 1)]
+    if size <= 0:
+        return []  # nothing to fetch: an empty file
+    if not resumable:
+        return [Segment(0, 0, size - 1)]
     count = min(connections, max(1, size // min_part))
     part = size // count
     segments = []

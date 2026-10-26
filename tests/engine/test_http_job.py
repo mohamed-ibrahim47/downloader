@@ -96,6 +96,8 @@ def test_pause_then_resume_in_new_instance(http_server, store, tmp_path):
     assert saved.status is Status.PAUSED
     assert sum(s.done for s in saved.segments) > 0
     assert saved.downloaded < len(DATA)
+    from copy import deepcopy
+    store_snapshot = deepcopy(saved.segments)
 
     http_server.entries["/slow.bin"].delay_per_chunk = 0
     before = len(http_server.get_ranges("/slow.bin"))
@@ -103,7 +105,9 @@ def test_pause_then_resume_in_new_instance(http_server, store, tmp_path):
     assert saved.status is Status.COMPLETED
     assert (tmp_path / "slow.bin").read_bytes() == DATA
     resumed = http_server.get_ranges("/slow.bin")[before:]
-    assert resumed and all(not r.startswith("bytes=0-") for r in resumed)
+    # Every unfinished part picks up at its own saved offset (a part with no progress starts at its start).
+    expected = {f"bytes={s.start + s.done}-{s.end}" for s in store_snapshot if not s.finished}
+    assert set(resumed) == expected
 
 
 def test_retries_then_succeeds(http_server, store, tmp_path):
@@ -115,13 +119,88 @@ def test_retries_then_succeeds(http_server, store, tmp_path):
 
 
 def test_gives_up_after_three_retries(http_server, store, tmp_path):
-    url = http_server.add("/broken.bin", DATA, fail_times=99)
+    url = http_server.add("/broken.bin", DATA, fail_times=99, fail_without_data=True)
     d = _download(url, tmp_path, connections=1)
     before = len(http_server.get_ranges("/broken.bin"))
     _job(d, store).run()
     assert d.status is Status.FAILED
     assert d.error == "connection lost · check your internet"
     assert len(http_server.get_ranges("/broken.bin")) - before == 4
+
+
+def test_empty_file_completes(http_server, store, tmp_path):
+    url = http_server.add("/empty.txt", b"")
+    d = _download(url, tmp_path)
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED, d.error
+    assert (tmp_path / "empty.txt").read_bytes() == b""
+
+
+def test_fresh_download_ignores_stale_part(http_server, store, tmp_path):
+    # Review C1: a stale, larger `name.part` must not leave junk in a new download.
+    (tmp_path / "stale.bin.part").write_bytes(b"J" * (len(DATA) + 500_000))
+    url = http_server.add("/stale.bin", DATA)
+    d = _download(url, tmp_path)
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED
+    assert (tmp_path / d.filename).read_bytes() == DATA
+
+
+def test_download_through_redirect(http_server, store, tmp_path):
+    http_server.add("/real/file.bin", DATA)
+    url = http_server.add("/go", b"", redirect_to="/real/file.bin")
+    d = _download(url, tmp_path)
+    assert d.url == url  # review I3: keep the link the user pasted, not the redirect target
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED
+    assert (tmp_path / "file.bin").read_bytes() == DATA
+
+
+def test_retries_reset_after_progress(http_server, store, tmp_path):
+    # Review I8: six short drops, each after some progress, must not fail the download.
+    url = http_server.add("/drops.bin", DATA, fail_times=6)
+    d = _download(url, tmp_path, connections=1)
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED, d.error
+    assert (tmp_path / "drops.bin").read_bytes() == DATA
+
+
+def test_crash_in_a_connection_never_marks_completed(http_server, store, tmp_path):
+    url = http_server.add("/crash.bin", DATA)
+    d = _download(url, tmp_path, connections=2)
+    store.add(d)
+    calls = []
+
+    def progress(_d):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+
+    HttpJob(d, store, TokenBucket(None), progress, lambda _d: None, backoff=(0, 0, 0)).run()
+    assert d.status is not Status.COMPLETED or (tmp_path / d.filename).read_bytes() == DATA
+
+
+def test_gzip_server_does_not_corrupt(http_server, store, tmp_path):
+    url = http_server.add("/gz.bin", DATA, gzip=True)
+    d = _download(url, tmp_path)
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED
+    assert (tmp_path / "gz.bin").read_bytes() == DATA
+
+
+def test_pause_interrupts_retry_backoff(http_server, store, tmp_path):
+    url = http_server.add("/down.bin", DATA, fail_times=99)
+    d = _download(url, tmp_path, connections=1)
+    store.add(d)
+    job = HttpJob(d, store, TokenBucket(None), lambda _d: None, lambda _d: None, backoff=(10, 10, 10))
+    job.start()
+    deadline = time.monotonic() + 5
+    while len(http_server.get_ranges("/down.bin")) < 2 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    t0 = time.monotonic()
+    job.pause()
+    assert time.monotonic() - t0 < 2
+    assert d.status is Status.PAUSED
 
 
 def test_too_many_connections_backs_off_to_fewer(http_server, store, tmp_path):

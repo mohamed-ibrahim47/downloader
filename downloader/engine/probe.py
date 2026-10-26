@@ -79,4 +79,6 @@ def probe(url: str, timeout: float = 15) -> FileInfo:
         session.close()
 
     name = filename_from_disposition(disposition) or filename_from_url(final_url)
-    return FileInfo(url=final_url, filename=safe_filename(name), size=size, resumable=bool(resumable))
+    # Keep the link as pasted: redirect targets are often signed and expire within minutes,
+    # and every connection follows the redirect again anyway.
+    return FileInfo(url=url, filename=safe_filename(name), size=size, resumable=bool(resumable))

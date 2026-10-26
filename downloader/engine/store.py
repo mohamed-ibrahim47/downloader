@@ -18,6 +18,9 @@ class Store:
     def __init__(self, path: Path):
         self._lock = threading.Lock()
         self._db = sqlite3.connect(str(path), check_same_thread=False)
+        # Write-ahead log: progress saves from download threads don't hold up the window.
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute("PRAGMA synchronous=NORMAL")
         cols = ", ".join(_COLUMNS)
         with self._db:
             self._db.execute(f"CREATE TABLE IF NOT EXISTS downloads (id INTEGER PRIMARY KEY, {cols}, segments TEXT)")
@@ -49,12 +52,17 @@ class Store:
         return Download(**data)
 
     def add(self, d: Download) -> int:
+        return self.add_many([d])[0]
+
+    def add_many(self, downloads: list[Download]) -> list[int]:
+        """Insert several downloads in one transaction (a playlist adds hundreds at once)."""
         cols = ", ".join([*_COLUMNS, "segments"])
         marks = ", ".join("?" * (len(_COLUMNS) + 1))
         with self._lock, self._db:
-            cur = self._db.execute(f"INSERT INTO downloads ({cols}) VALUES ({marks})", self._row_values(d))
-        d.id = cur.lastrowid
-        return d.id
+            for d in downloads:
+                cur = self._db.execute(f"INSERT INTO downloads ({cols}) VALUES ({marks})", self._row_values(d))
+                d.id = cur.lastrowid
+        return [d.id for d in downloads]
 
     def update(self, d: Download) -> None:
         sets = ", ".join(f"{c} = ?" for c in [*_COLUMNS, "segments"])
@@ -62,9 +70,11 @@ class Store:
             self._db.execute(f"UPDATE downloads SET {sets} WHERE id = ?", [*self._row_values(d), d.id])
 
     def save_segments(self, download_id: int, segments: list[Segment]) -> None:
+        """Progress checkpoint; the byte count goes with it so a crash keeps the card's percentage."""
         with self._lock, self._db:
-            self._db.execute("UPDATE downloads SET segments = ? WHERE id = ?",
-                             (json.dumps([asdict(s) for s in segments]), download_id))
+            self._db.execute("UPDATE downloads SET segments = ?, downloaded = ? WHERE id = ?",
+                             (json.dumps([asdict(s) for s in segments]), sum(s.done for s in segments),
+                              download_id))
 
     def get(self, download_id: int) -> Download | None:
         with self._lock:

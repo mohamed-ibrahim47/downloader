@@ -12,6 +12,14 @@ def test_probe_reads_size_and_ranges(http_server):
     assert info.filename == "a.zip"
 
 
+def test_probe_keeps_pasted_url_but_names_from_target(http_server):
+    http_server.add("/assets/tool-1.2.zip", b"x" * 10)
+    url = http_server.add("/latest", b"", redirect_to="/assets/tool-1.2.zip")
+    info = probe(url)
+    assert info.url == url
+    assert info.filename == "tool-1.2.zip"
+
+
 def test_probe_without_ranges(http_server):
     url = http_server.add("/b.bin", b"x" * 10, ranges=False)
     assert probe(url).resumable is False
