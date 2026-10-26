@@ -108,8 +108,13 @@ def test_clipboard_ignores_plain_text(win, qtbot):
     assert win.smart_bar.input.text() == ""
 
 
-def test_smoke_flag_exits_zero(tmp_path, monkeypatch, qapp):
-    monkeypatch.setenv("DOWNLOADER_HOME", str(tmp_path / "home"))
-    from downloader.__main__ import main
-    assert main(["--smoke"]) == 0
+def test_smoke_flag_exits_zero(tmp_path):
+    # Its own process: main() owns and quits its QApplication, which must not be pytest's.
+    import os
+    import subprocess
+    import sys
+    env = {**os.environ, "DOWNLOADER_HOME": str(tmp_path / "home"), "QT_QPA_PLATFORM": "offscreen"}
+    result = subprocess.run([sys.executable, "-m", "downloader", "--smoke"], env=env,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
     assert (tmp_path / "home" / "downloader.db").exists()
