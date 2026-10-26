@@ -124,6 +124,22 @@ def test_gives_up_after_three_retries(http_server, store, tmp_path):
     assert len(http_server.get_ranges("/broken.bin")) - before == 4
 
 
+def test_too_many_connections_backs_off_to_fewer(http_server, store, tmp_path):
+    url = http_server.add("/busy.bin", DATA, max_conns=1, delay_per_chunk=0.002)
+    d = _download(url, tmp_path, connections=8)
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED, d.error
+    assert (tmp_path / "busy.bin").read_bytes() == DATA
+
+
+def test_still_busy_with_one_connection_fails_plainly(http_server, store, tmp_path):
+    url = http_server.add("/full.bin", DATA, status=429)
+    d = _download(url, tmp_path, use_probe=False)
+    _job(d, store).run()
+    assert d.status is Status.FAILED
+    assert d.error == "server is busy (429) · try again later"
+
+
 def test_403_fails_with_plain_message(http_server, store, tmp_path):
     url = http_server.add("/gone.bin", DATA, status=403)
     d = _download(url, tmp_path, use_probe=False)

@@ -64,9 +64,13 @@ def unique_path(folder: Path, name: str) -> Path:
         n += 1
 
 
-def free_space(folder: Path) -> int:
-    """Free bytes on the drive holding `folder` (its nearest existing parent)."""
+def disk_usage(folder: Path):
+    """`shutil.disk_usage` for the drive holding `folder`, which may not exist yet."""
     folder = Path(folder)
     while not folder.exists() and folder != folder.parent:
         folder = folder.parent
-    return shutil.disk_usage(folder).free
+    return shutil.disk_usage(folder)
+
+
+def free_space(folder: Path) -> int:
+    return disk_usage(folder).free

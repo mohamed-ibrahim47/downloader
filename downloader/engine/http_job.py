@@ -54,6 +54,10 @@ class HttpJob:
         self._no_ranges = False
         self._thread: threading.Thread | None = None
         self._last_progress = 0.0
+        # How many connections may be open at once; drops to 1 if the server says it's busy.
+        self._gate = threading.Condition()
+        self._allowed = download.connections
+        self._open = 0
 
     # ---- public -------------------------------------------------------------
 
@@ -162,12 +166,36 @@ class HttpJob:
             self._error = self._error or message
         self._halt.set()
 
+    def _acquire(self) -> bool:
+        with self._gate:
+            while self._open >= self._allowed:
+                if self._stopped():
+                    return False
+                self._gate.wait(0.1)
+            self._open += 1
+            return True
+
+    def _release(self) -> None:
+        with self._gate:
+            self._open -= 1
+            self._gate.notify_all()
+
+    def _fewer_connections(self) -> bool:
+        """The server refused extra connections: carry on one at a time. False if already there."""
+        with self._gate:
+            if self._allowed == 1:
+                return False
+            self._allowed = 1
+            return True
+
     def _worker(self, seg: Segment) -> None:
         attempt = 0
         session = requests.Session()
         session.headers["User-Agent"] = USER_AGENT
         try:
             while not self._stopped():
+                if not self._acquire():
+                    return
                 try:
                     self._fetch(session, seg)
                     return
@@ -176,7 +204,10 @@ class HttpJob:
                     self._halt.set()
                     return
                 except _HttpStatus as e:
-                    if e.code < 500 or attempt >= len(self._backoff):
+                    if e.code in (429, 503) and self._fewer_connections():
+                        continue
+                    retryable = e.code >= 500 or e.code == 429
+                    if not retryable or attempt >= len(self._backoff):
                         self._fail(message_for_status(e.code))
                         return
                 except (requests.RequestException, ConnectionError):
@@ -186,6 +217,8 @@ class HttpJob:
                 except OSError as e:
                     self._fail(DISK_FULL if e.errno == errno.ENOSPC else cant_write(self.download.folder))
                     return
+                finally:
+                    self._release()
                 time.sleep(self._backoff[attempt])
                 attempt += 1
         finally:

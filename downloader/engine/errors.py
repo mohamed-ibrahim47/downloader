@@ -14,6 +14,8 @@ def message_for_status(code: int) -> str:
         return "server refused (403) · link may have expired"
     if code == 404:
         return "file not found on server (404)"
+    if code == 429:
+        return "server is busy (429) · try again later"
     return f"server error ({code})"
 
 

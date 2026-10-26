@@ -12,6 +12,7 @@ from ..engine.probe import FileInfo, probe
 from ..engine.youtube import (PlaylistInfo, QUALITIES, VideoInfo, choose_format, estimate_playlist_size,
                               fetch_info)
 from .dialogs import FormatDialog, PlaylistDialog
+from .elided import ElidedLabel
 from .formatting import fmt_bytes, fmt_duration
 from .icons import pixmap
 from .workers import run_in_pool
@@ -59,8 +60,8 @@ class SmartBar(QWidget):
         self._thumb = QLabel(objectName="thumb")
         self._thumb.setFixedSize(80, 46)
         self._thumb.setAlignment(Qt.AlignCenter)
-        self._title = _plain("optTitle")
-        self._meta = _plain("optMeta")
+        self._title = ElidedLabel(objectName="optTitle")
+        self._meta = ElidedLabel(objectName="optMeta")
         self._more = QPushButton("more formats", objectName="linkButton")
         self._choose = QPushButton("choose videos…", objectName="linkButton")
         for b in (self._more, self._choose):
@@ -69,10 +70,9 @@ class SmartBar(QWidget):
         self._choose.clicked.connect(self._open_playlist)
         meta_row = QHBoxLayout()
         meta_row.setSpacing(8)
-        meta_row.addWidget(self._meta)
+        meta_row.addWidget(self._meta, 1)
         meta_row.addWidget(self._more)
         meta_row.addWidget(self._choose)
-        meta_row.addStretch(1)
         text_col = QVBoxLayout()
         text_col.setSpacing(3)
         text_col.addWidget(self._title)
@@ -272,7 +272,6 @@ class SmartBar(QWidget):
             self.action.setEnabled(k > 0)
         self._thumb.setPixmap(pixmap(icon_name, p["accent"], 20))
         self._title.setText(title)
-        self._title.setToolTip("")
         self._meta.setText(meta)
         self._size.setText(size)
         self._size_note.setText(note)

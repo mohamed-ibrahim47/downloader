@@ -7,6 +7,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QProgressBar, QToolButton, QVBoxLayout
 
 from ..engine.models import Download, Kind, Status
+from .elided import ElidedLabel
 from .formatting import fmt_bytes, fmt_eta, fmt_speed, plain_tip
 from .icons import icon, pixmap
 from .theme import status_color
@@ -82,13 +83,13 @@ class DownloadCard(QFrame):
         self._icon = QLabel(objectName="cardIconBox")
         self._icon.setFixedSize(46, 46)
         self._icon.setAlignment(Qt.AlignCenter)
-        self._name = QLabel(objectName="cardName")
+        self._name = ElidedLabel(objectName="cardName")
         self._meta = QLabel(objectName="cardMeta")
         self._bar = QProgressBar(objectName="cardBar")
         self._bar.setTextVisible(False)
         self._status = QLabel(objectName="cardStatus")
-        self._detail = QLabel(objectName="cardDetail")
-        for label in (self._name, self._meta, self._status, self._detail):
+        self._detail = ElidedLabel(objectName="cardDetail")
+        for label in (self._meta, self._status):
             label.setTextFormat(Qt.PlainText)
         self._primary = QToolButton(objectName="cardPrimary")
         self._remove = QToolButton(objectName="cardRemove")
@@ -138,7 +139,6 @@ class DownloadCard(QFrame):
         status, detail = status_texts(d, speed, eta)
         self._status.setText(status)
         self._detail.setText(detail)
-        self._detail.setToolTip(plain_tip(detail))
         pct = _pct(d)
         if d.status is Status.DOWNLOADING and pct is None:
             self._bar.setRange(0, 0)

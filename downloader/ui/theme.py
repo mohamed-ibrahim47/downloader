@@ -78,7 +78,7 @@ QLabel#optTitle {{ font-size: 14px; font-weight: 600; }}
 QLabel#optMeta, QLabel#sizeNote {{ color: {c['muted']}; font-size: 12px; }}
 QLabel#sizeLabel {{ font-weight: 600; }}
 QFrame#qualityGroup {{ background: {c['bg']}; border: 1px solid {c['cardBorder']}; border-radius: 10px; }}
-QPushButton#qualityButton {{ height: 28px; padding: 0 11px; border: none; border-radius: 8px;
+QPushButton#qualityButton {{ height: 28px; min-width: 46px; padding: 0 8px; border: none; border-radius: 8px;
     background: transparent; color: {c['muted']}; font-size: 12px; }}
 QPushButton#qualityButton:checked {{ background: {c['pillOn']}; color: {c['text']}; font-weight: 600; }}
 QPushButton#primaryButton {{ min-height: 40px; padding: 0 18px; border: none; border-radius: 10px;
@@ -110,6 +110,7 @@ QPushButton#segButton {{ min-height: 34px; border-radius: 8px; border: 1px solid
 QPushButton#segButton:checked {{ background: {c['navActive']}; border-color: {c['accent']}; }}
 QComboBox, QSpinBox, QTimeEdit, QLineEdit#field {{ min-height: 34px; border-radius: 10px; border: 1px solid {c['border']};
     background: {c['surface']}; padding: 0 10px; }}
+QComboBox::drop-down {{ border: none; width: 26px; }}
 QComboBox QAbstractItemView {{ background: {c['surface']}; border: 1px solid {c['border']};
     selection-background-color: {c['navActive']}; }}
 QCheckBox {{ spacing: 10px; }}

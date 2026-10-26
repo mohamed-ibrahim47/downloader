@@ -18,6 +18,8 @@ class _Entry:
     fail_times: int = 0
     disposition: str | None = None
     delay_per_chunk: float = 0.0
+    max_conns: int = 0  # >0: answer 429 when more GETs than this are in flight
+    active: int = 0
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -36,11 +38,27 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
-        if entry.status != 200:
-            self.send_response(entry.status)
+        status_now = entry.status
+        if body and entry.max_conns:
+            with owner.lock:
+                if entry.active >= entry.max_conns:
+                    status_now = 429
+                else:
+                    entry.active += 1
+        if status_now != 200:
+            self.send_response(status_now)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        try:
+            self._send_body(entry, rng, body)
+        finally:
+            if body and entry.max_conns:
+                with owner.lock:
+                    entry.active -= 1
+
+    def _send_body(self, entry, rng, body):
+        owner = self.server.owner
 
         data = entry.data
         start, end = 0, len(data) - 1
