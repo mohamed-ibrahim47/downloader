@@ -278,3 +278,30 @@ def test_loads_existing_downloads_from_store(tmp_path):
     store.add(d)
     q = DownloadQueue(store, lambda *a: None)
     assert [x.id for x in q.downloads()] == [d.id]
+
+
+def test_redownload_deletes_damaged_file_and_requeues(env, tmp_path):
+    q, jobs = env[0], env[1]
+    from downloader.engine.models import Segment
+    d = Download(url="https://x.org/a.zip", kind=Kind.FILE, filename="a.zip", folder=str(tmp_path),
+                 status=Status.FAILED, error="checksum doesn't match · the file may be damaged",
+                 downloaded=5, segments=[Segment(0, 0, 4, 5)], verified=False, duplicate_of="b.zip")
+    q._store.add(d)
+    q._downloads[d.id] = d
+    (tmp_path / "a.zip").write_bytes(b"12345")
+    q.redownload(d.id)
+    assert not (tmp_path / "a.zip").exists()
+    assert d.segments == [] and d.downloaded == 0 and d.error is None and d.duplicate_of is None
+    assert d.status in (Status.QUEUED, Status.DOWNLOADING)
+    assert jobs[d.id].started
+
+
+def test_redownload_ignores_other_statuses(env, tmp_path):
+    q = env[0]
+    d = Download(url="https://x.org/a.zip", kind=Kind.FILE, filename="a.zip", folder=str(tmp_path),
+                 status=Status.COMPLETED)
+    q._store.add(d)
+    q._downloads[d.id] = d
+    (tmp_path / "a.zip").write_bytes(b"12345")
+    q.redownload(d.id)
+    assert (tmp_path / "a.zip").exists() and d.status is Status.COMPLETED

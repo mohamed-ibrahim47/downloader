@@ -267,3 +267,100 @@ def test_speed_limit_slows_download(http_server, store, tmp_path):
     job.run()
     assert d.status is Status.COMPLETED
     assert time.monotonic() - t0 >= 0.4
+
+
+# ---- checking the finished file ----------------------------------------------
+
+import hashlib
+
+from downloader.engine import checksum as checksum_mod
+from downloader.engine.checksum import Checksum
+from downloader.engine.errors import CHECKSUM_MISMATCH
+
+SMALL = os.urandom(300_000)
+
+
+def _sha(data, algo="sha256"):
+    return str(Checksum(algo, hashlib.new(algo, data).hexdigest()))
+
+
+def test_checksum_match_marks_verified(http_server, store, tmp_path):
+    d = _download(http_server.add("/app.zip", SMALL), tmp_path)
+    d.checksum = _sha(SMALL)
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED and d.verified is True and d.checking is False
+    assert store.get(d.id).verified is True
+
+
+def test_md5_checksum_works(http_server, store, tmp_path):
+    d = _download(http_server.add("/app.zip", SMALL), tmp_path)
+    d.checksum = _sha(SMALL, "md5")
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED and d.verified is True
+
+
+def test_checksum_mismatch_fails_and_keeps_file(http_server, store, tmp_path):
+    d = _download(http_server.add("/app.zip", SMALL), tmp_path)
+    d.checksum = _sha(b"something else")
+    _job(d, store).run()
+    assert d.status is Status.FAILED and d.error == CHECKSUM_MISMATCH
+    assert d.verified is False and d.checking is False
+    assert (tmp_path / "app.zip").read_bytes() == SMALL
+    assert not (tmp_path / "app.zip.part").exists()
+
+
+def test_checking_reported_before_completion(http_server, store, tmp_path):
+    d = _download(http_server.add("/app.zip", SMALL), tmp_path)
+    d.checksum = _sha(SMALL)
+    store.add(d)
+    seen = []
+    HttpJob(d, store, TokenBucket(None), on_progress=lambda x: seen.append((x.checking, x.status)),
+            on_finish=lambda _d: None, backoff=(0, 0, 0)).run()
+    assert (True, Status.DOWNLOADING) in seen
+    assert d.checking is False
+
+
+def test_pause_while_checking_resumes_without_refetch(http_server, store, tmp_path, monkeypatch):
+    d = _download(http_server.add("/app.zip", SMALL), tmp_path)
+    d.checksum = _sha(SMALL)
+    job = _job(d, store)
+    real = checksum_mod.hash_file
+
+    def paused(path, algos, should_stop=lambda: False):
+        job.signal_pause()
+        return real(path, algos, should_stop)
+
+    monkeypatch.setattr(checksum_mod, "hash_file", paused)
+    job.run()
+    assert d.status is Status.PAUSED and d.checking is False
+    assert (tmp_path / "app.zip.part").exists() and not (tmp_path / "app.zip").exists()
+    assert store.get(d.id).status is Status.PAUSED
+
+    monkeypatch.setattr(checksum_mod, "hash_file", real)
+    gets = len(http_server.get_ranges("/app.zip"))
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED and d.verified is True
+    assert (tmp_path / "app.zip").read_bytes() == SMALL
+    assert len(http_server.get_ranges("/app.zip")) == gets
+
+
+def test_no_checksum_makes_no_claim(http_server, store, tmp_path):
+    d = _download(http_server.add("/app.zip", SMALL), tmp_path)
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED and d.verified is False and d.duplicate_of is None
+
+
+def test_identical_file_in_folder_sets_duplicate_of(http_server, store, tmp_path):
+    (tmp_path / "setup.zip").write_bytes(SMALL)
+    d = _download(http_server.add("/setup.zip", SMALL), tmp_path)
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED
+    assert d.filename == "setup (2).zip" and d.duplicate_of == "setup.zip"
+    assert store.get(d.id).duplicate_of == "setup.zip"
+
+
+def test_same_size_different_content_is_not_duplicate(http_server, store, tmp_path):
+    (tmp_path / "other.zip").write_bytes(os.urandom(len(SMALL)))
+    d = _download(http_server.add("/setup.zip", SMALL), tmp_path)
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED and d.duplicate_of is None

@@ -12,9 +12,10 @@ from typing import Callable
 
 import requests
 
-from .errors import CONNECTION_LOST, DISK_FULL, DownloadError, cant_write, message_for_status
+from . import checksum
+from .errors import CHECKSUM_MISMATCH, CONNECTION_LOST, DISK_FULL, DownloadError, cant_write, message_for_status
 from .models import Download, Segment, Status
-from .paths import unique_path
+from .paths import same_size_files, unique_path
 from .probe import USER_AGENT
 from .ratelimit import TokenBucket
 from .segments import plan_segments
@@ -88,12 +89,13 @@ class HttpJob:
                     d.resumable = False
                     d.segments = plan_segments(d.size, 1, False)
                     self._reset_part()
-            if self._pause.is_set():
-                d.status = Status.PAUSED
-            else:
+            if not self._pause.is_set():
                 self._complete()
+            if d.status is Status.DOWNLOADING:  # paused, possibly while checking the file
+                d.status = Status.PAUSED
         except DownloadError as e:
             d.status, d.error = Status.FAILED, str(e)
+        d.checking = False
         d.downloaded = sum(s.done for s in d.segments)
         self._store.update(d)
         self._on_finish(d)
@@ -148,14 +150,51 @@ class HttpJob:
             raise DownloadError("download stopped before the end · press Retry to continue")
         if d.size is None:
             d.size = sum(s.done for s in d.segments)
+        # Checked while still a .part: a pause or a crash here keeps every byte, and Resume re-checks.
+        if not self._check_part():
+            return
+        self._rename()
+        d.status = Status.COMPLETED
+        d.finished_at = time.time()
+
+    def _check_part(self) -> bool:
+        """Compare with the expected checksum and look for an identical file already in the
+        folder. False if paused part-way."""
+        d = self.download
+        expected = checksum.Checksum.from_stored(d.checksum)
+        candidates = same_size_files(d.target_path.parent, d.size, d.part_path)
+        algos = {expected.algo} if expected else set()
+        if candidates:
+            algos.add("sha256")
+        if not algos:
+            return True
+        d.checking = True
+        self._on_progress(d)
+        hashes = checksum.hash_file(d.part_path, algos, self._pause.is_set)
+        if hashes is None:
+            return False
+        if expected:
+            if hashes[expected.algo] != expected.hex:
+                self._rename()  # kept, so the user can look at it; Retry offers to delete it
+                raise DownloadError(CHECKSUM_MISMATCH)
+            d.verified = True
+        for other in candidates:
+            other_hash = checksum.hash_file(other, {"sha256"}, self._pause.is_set)
+            if other_hash is None:
+                return False
+            if other_hash["sha256"] == hashes["sha256"]:
+                d.duplicate_of = other.name
+                break
+        return True
+
+    def _rename(self) -> None:
+        d = self.download
         final = unique_path(d.target_path.parent, d.filename)
         try:
             d.part_path.replace(final)
         except OSError as e:
             raise DownloadError(cant_write(final.parent)) from e
         d.filename = final.name
-        d.status = Status.COMPLETED
-        d.finished_at = time.time()
 
     def _save_progress(self) -> None:
         d = self.download

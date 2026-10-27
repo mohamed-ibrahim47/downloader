@@ -3,6 +3,7 @@ from __future__ import annotations
 
 CONNECTION_LOST = "connection lost · check your internet"
 DISK_FULL = "disk is full"
+CHECKSUM_MISMATCH = "checksum doesn't match · the file may be damaged"
 
 
 class DownloadError(Exception):

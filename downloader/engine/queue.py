@@ -144,6 +144,22 @@ class DownloadQueue:
     def retry(self, download_id: int) -> None:
         self._requeue(download_id, (Status.FAILED,))
 
+    def redownload(self, download_id: int) -> None:
+        """A failed download (a damaged file) from scratch: its file is deleted first. The UI
+        asks before calling this."""
+        with self._lock:
+            d = self._downloads.get(download_id)
+            if d is None or d.status is not Status.FAILED:
+                return
+            try:
+                d.target_path.unlink(missing_ok=True)
+                d.part_path.unlink(missing_ok=True)
+            except OSError:
+                pass  # still open elsewhere: the new copy gets a " (2)" name instead
+            d.segments, d.downloaded = [], 0
+            d.verified, d.duplicate_of = False, None
+        self.retry(download_id)
+
     def remove(self, download_id: int, delete_file: bool = False) -> None:
         self.pause(download_id)
         with self._lock:
