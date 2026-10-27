@@ -292,3 +292,101 @@ def test_playlist_dialog_marks_downloaded(qtbot):
     qtbot.addWidget(dialog)
     texts = [dialog._list.item(i).text() for i in range(2)]
     assert "already downloaded" not in texts[0] and texts[1].endswith("already downloaded")
+
+
+# ---- checksums ---------------------------------------------------------------------
+
+import hashlib
+
+from PySide6.QtWidgets import QLineEdit
+
+from downloader.engine.checksum import Checksum
+
+H = hashlib.sha256(b"x").hexdigest()
+
+
+def _sum_field(bar):
+    return bar.findChild(QLineEdit, "checksumInput")
+
+
+def _sum_note(bar):
+    label = bar.findChild(QLabel, "checksumNote")
+    return label.text() if label.isVisible() else ""
+
+
+def test_checksum_link_reveals_field(bar, qtbot, monkeypatch):
+    _file(bar, qtbot, monkeypatch)
+    assert not _sum_field(bar).isVisible()
+    qtbot.mouseClick(_button(bar, "check with checksum…"), Qt.LeftButton)
+    assert _sum_field(bar).isVisible()
+
+
+def test_checksum_link_only_for_files(bar, qtbot, monkeypatch):
+    _video(bar, qtbot, monkeypatch)
+    assert not _button(bar, "check with checksum…").isVisible()
+
+
+def test_checksum_found_automatically(bar, qtbot, monkeypatch):
+    seen = []
+    monkeypatch.setattr(smart_bar, "lookup_sums",
+                        lambda url, name: seen.append((url, name)) or (Checksum("sha256", H), "SHA256SUMS"))
+    _file(bar, qtbot, monkeypatch)
+    qtbot.waitUntil(lambda: _sum_note(bar) == "checksum found (SHA256SUMS)", timeout=3000)
+    assert seen == [("https://e.com/a.zip", "a.zip")]
+    qtbot.mouseClick(bar.action, Qt.LeftButton)
+    d = bar.ctl.downloads()[0]
+    assert d.checksum == f"sha256:{H}" and d.checksum_source == "SHA256SUMS"
+
+
+def test_pasted_checksum_wins(bar, qtbot, monkeypatch):
+    monkeypatch.setattr(smart_bar, "lookup_sums", lambda url, name: (Checksum("sha256", "c" * 64), "SHA256SUMS"))
+    _file(bar, qtbot, monkeypatch)
+    qtbot.waitUntil(lambda: "found" in _sum_note(bar), timeout=3000)
+    qtbot.mouseClick(_button(bar, "check with checksum…"), Qt.LeftButton)
+    _sum_field(bar).setText(f"{H.upper()}  a.zip")
+    assert _sum_note(bar) == "SHA-256 · checked after download"
+    qtbot.mouseClick(bar.action, Qt.LeftButton)
+    d = bar.ctl.downloads()[0]
+    assert d.checksum == f"sha256:{H}" and d.checksum_source == "pasted"
+
+
+def test_invalid_checksum_disables_download(bar, qtbot, monkeypatch):
+    _file(bar, qtbot, monkeypatch)
+    qtbot.mouseClick(_button(bar, "check with checksum…"), Qt.LeftButton)
+    _sum_field(bar).setText("not a hash")
+    assert _sum_note(bar) == "paste a checksum: 32, 40, 64 or 128 hex characters"
+    assert not bar.action.isEnabled()
+    _sum_field(bar).clear()
+    assert bar.action.isEnabled() and _sum_note(bar) == ""
+
+
+def test_stale_lookup_ignored(bar, qtbot, monkeypatch):
+    import threading
+    gate = threading.Event()
+
+    def slow(url, name):
+        gate.wait(2)
+        return Checksum("sha256", H), "SHA256SUMS"
+
+    monkeypatch.setattr(smart_bar, "lookup_sums", slow)
+    _file(bar, qtbot, monkeypatch)
+    monkeypatch.setattr(smart_bar, "lookup_sums", lambda url, name: None)
+    _file(bar, qtbot, monkeypatch, url="https://e.com/b.zip")
+    gate.set()
+    qtbot.wait(300)
+    assert _sum_note(bar) == ""
+
+
+def test_lookup_failure_is_silent(bar, qtbot, monkeypatch):
+    _file(bar, qtbot, monkeypatch)
+    qtbot.wait(100)
+    assert _sum_note(bar) == "" and bar.hint.text() != ""
+    assert bar.state == "file"
+
+
+def test_new_link_clears_pasted_checksum(bar, qtbot, monkeypatch):
+    _file(bar, qtbot, monkeypatch)
+    qtbot.mouseClick(_button(bar, "check with checksum…"), Qt.LeftButton)
+    _sum_field(bar).setText(H)
+    _file(bar, qtbot, monkeypatch, url="https://e.com/b.zip")
+    assert _sum_field(bar).text() == "" and not _sum_field(bar).isVisible()

@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QVBoxLayout, QWidget)
 
+from ..engine.checksum import lookup_sums, parse_checksum
 from ..engine.linkkind import LinkKind, classify
 from ..engine.probe import FileInfo, probe
 from ..engine.youtube import (PlaylistInfo, QUALITIES, VideoInfo, choose_format, clip_size,
@@ -21,6 +22,7 @@ from .workers import run_in_pool
 DEBOUNCE_MS = 400
 HINT_IDLE = "Copied links are picked up automatically"
 HINT_IDLE_NO_WATCH = "A file starts right away; a video or playlist shows its options first"
+BAD_CHECKSUM = "paste a checksum: 32, 40, 64 or 128 hex characters"
 
 
 def _plain(name: str) -> QLabel:
@@ -45,6 +47,7 @@ class SmartBar(QWidget):
         self._picked: set[int] = set()
         self._have: set[int] = set()
         self._existing = None
+        self._found = None  # (Checksum, sums file name) published next to the file
         self._quality = "720p"
 
         frame = QFrame(objectName="smartBar")
@@ -81,6 +84,10 @@ class SmartBar(QWidget):
         meta_row.addWidget(self._more)
         meta_row.addWidget(self.clip.toggle)
         meta_row.addWidget(self._choose)
+        self._checksum_link = QPushButton("check with checksum…", objectName="linkButton")
+        self._checksum_link.setCursor(Qt.PointingHandCursor)
+        self._checksum_link.clicked.connect(self._open_checksum)
+        meta_row.addWidget(self._checksum_link)
         text_col = QVBoxLayout()
         text_col.setSpacing(3)
         text_col.addWidget(self._title)
@@ -121,6 +128,7 @@ class SmartBar(QWidget):
         box.setSpacing(10)
         box.addLayout(opt)
         box.addWidget(self.clip)
+        box.addWidget(self._build_checksum_row())
         box.addWidget(self._build_notice())
 
         frame_layout = QVBoxLayout(frame)
@@ -139,6 +147,28 @@ class SmartBar(QWidget):
         self._debounce = QTimer(self, singleShot=True, interval=DEBOUNCE_MS, timeout=self._check)
         self.input.textEdited.connect(lambda _t: self._debounce.start())
         self.input.returnPressed.connect(self._check)
+        self._render()
+
+    def _build_checksum_row(self) -> QWidget:
+        self._sum_row = QWidget()
+        self._sum_input = QLineEdit(objectName="checksumInput")
+        self._sum_input.setPlaceholderText("Paste the SHA-256, SHA-1 or MD5 the site gives")
+        self._sum_input.setAccessibleName("Checksum")
+        self._sum_input.textChanged.connect(lambda _t: self._render())
+        self._sum_note = _plain("checksumNote")
+        row = QHBoxLayout(self._sum_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(12)
+        row.addWidget(self._sum_input, 1)
+        row.addWidget(self._sum_note)
+        row.addStretch(0)
+        self._sum_input.setVisible(False)
+        self._sum_row.setVisible(False)
+        return self._sum_row
+
+    def _open_checksum(self) -> None:
+        self._sum_input.setVisible(True)
+        self._sum_input.setFocus()
         self._render()
 
     def _build_notice(self) -> QWidget:
@@ -178,6 +208,11 @@ class SmartBar(QWidget):
         self._debounce.stop()
         text = self.input.text().strip()
         self._token += 1
+        self._found = None
+        self._sum_input.blockSignals(True)
+        self._sum_input.clear()
+        self._sum_input.blockSignals(False)
+        self._sum_input.setVisible(False)
         kind = classify(text)
         if not text:
             self._set_state("empty")
@@ -202,6 +237,9 @@ class SmartBar(QWidget):
         if isinstance(result, FileInfo):
             self._file = result
             self._set_state("file")
+            task = run_in_pool(lookup_sums, result.url, result.filename)
+            task.setProperty("token", self._token)
+            task.done.connect(self._on_sums)
         elif isinstance(result, VideoInfo):
             self._video = result
             self.clip.set_video(result.duration, self.input.text().strip())
@@ -211,6 +249,13 @@ class SmartBar(QWidget):
             self._have = self.ctl.already_have(result)
             self._picked = {e.index for e in result.entries} - self._have
             self._set_state("playlist" if result.entries else "error")
+
+    @Slot(object)
+    def _on_sums(self, found) -> None:
+        if not self._current() or found is None:
+            return
+        self._found = found
+        self._render()
 
     @Slot(str)
     def _on_error(self, message: str) -> None:
@@ -227,7 +272,13 @@ class SmartBar(QWidget):
 
     def _download(self) -> None:
         if self.state == "file":
-            self.ctl.add_file(self._file)
+            pasted = parse_checksum(self._sum_input.text()) if self._sum_input.text().strip() else None
+            if pasted:
+                self.ctl.add_file(self._file, checksum=pasted, checksum_source="pasted")
+            elif self._found:
+                self.ctl.add_file(self._file, checksum=self._found[0], checksum_source=self._found[1])
+            else:
+                self.ctl.add_file(self._file)
         elif self.state == "video":
             self.ctl.add_video(self._video, choose_format(self._video.formats, self._quality),
                                clip=self.clip.clip())
@@ -275,11 +326,13 @@ class SmartBar(QWidget):
         if not showing:
             self.clip.setVisible(False)
             self._notice_row.setVisible(False)
+            self._sum_row.setVisible(False)
             return
 
         self.quality_group.setVisible(state != "file")
         self._more.setVisible(state == "video")
         self.clip.toggle.setVisible(state == "video")
+        self._checksum_link.setVisible(state == "file" and self._sum_input.isHidden())
         self.clip.setVisible(state == "video" and self.clip.on())
         self._choose.setVisible(state == "playlist")
         self.action.setEnabled(True)
@@ -291,6 +344,7 @@ class SmartBar(QWidget):
             size = fmt_bytes(f.size) or "Size unknown"
             note = f"{s.connections} connections" if f.resumable else "1 connection"
             action = "Download"
+            self._render_checksum()
         elif state == "video":
             v = self._video
             self.badge.setText("YouTube video")
@@ -319,6 +373,8 @@ class SmartBar(QWidget):
             note = f"{k} of {n} videos"
             action = "Download all" if k == n else f"Download {k} videos"
             self.action.setEnabled(k > 0)
+        if state != "file":
+            self._sum_row.setVisible(False)
         self._render_notice(state)
         self._thumb.setPixmap(pixmap(icon_name, p["accent"], 20))
         self._title.setText(title)
@@ -346,3 +402,17 @@ class SmartBar(QWidget):
         self._open_existing.setVisible(found.finished)
         self._again.setVisible(found.finished)
         self._show_it.setVisible(not found.finished)
+
+    def _render_checksum(self) -> None:
+        text = self._sum_input.text().strip()
+        if text:
+            pasted = parse_checksum(text)
+            note = f"{pasted.label} · checked after download" if pasted else BAD_CHECKSUM
+            self.action.setEnabled(pasted is not None)
+        elif self._found:
+            note = f"checksum found ({self._found[1]})"
+        else:
+            note = ""
+        self._sum_note.setText(note)
+        self._sum_note.setVisible(bool(note))
+        self._sum_row.setVisible(bool(note) or not self._sum_input.isHidden())
