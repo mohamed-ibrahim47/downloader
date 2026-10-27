@@ -125,3 +125,61 @@ def test_stale_result_ignored(bar, qtbot, monkeypatch):
     bar.set_text("hello")
     qtbot.wait(600)
     assert bar.state == "invalid"
+
+
+# ---- clips -------------------------------------------------------------------------
+
+def _video(bar, qtbot, monkeypatch, url="https://www.youtube.com/watch?v=aqz-KE-bpKQ"):
+    monkeypatch.setattr(smart_bar, "fetch_info",
+                        lambda u: VideoInfo(u, "Big Buck Bunny", "Blender Foundation", 596, FORMATS))
+    bar.set_text(url)
+    qtbot.waitUntil(lambda: bar.state == "video", timeout=3000)
+    bar.show()
+
+
+def test_smart_bar_clip_size_and_download(bar, qtbot, monkeypatch):
+    _video(bar, qtbot, monkeypatch)
+    assert bar.clip.toggle.isVisible()
+    bar.clip.toggle.setChecked(True)
+    bar.clip.from_edit.setText("0:00")
+    bar.clip.to_edit.setText("4:58")
+    assert _label(bar, "sizeLabel") == "≈ 24.1 MB"
+    assert _label(bar, "sizeNote") == "clip · estimate"
+    qtbot.mouseClick(bar.action, Qt.LeftButton)
+    d = bar.ctl.downloads()[0]
+    assert d.clip == (0, 298) and d.filename == "Big Buck Bunny (0-00 to 4-58).mp4"
+
+
+def test_smart_bar_invalid_clip_disables_download(bar, qtbot, monkeypatch):
+    _video(bar, qtbot, monkeypatch)
+    bar.clip.toggle.setChecked(True)
+    bar.clip.to_edit.setText("20:00")
+    assert not bar.action.isEnabled()
+    bar.clip.to_edit.setText("2:00")
+    assert bar.action.isEnabled()
+
+
+def test_clip_switch_hidden_for_files(bar, qtbot, monkeypatch):
+    monkeypatch.setattr(smart_bar, "probe", lambda url: FileInfo(url, "a.zip", 10, True))
+    bar.set_text("https://e.com/a.zip")
+    qtbot.waitUntil(lambda: bar.state == "file", timeout=3000)
+    bar.show()
+    assert not bar.clip.toggle.isVisible() and not bar.clip.isVisible()
+
+
+def test_new_link_resets_clip(bar, qtbot, monkeypatch):
+    _video(bar, qtbot, monkeypatch)
+    bar.clip.toggle.setChecked(True)
+    _video(bar, qtbot, monkeypatch, url="https://youtu.be/aqz-KE-bpKQ?t=90")
+    assert not bar.clip.on() and bar.clip.from_edit.text() == "1:30"
+
+
+def test_format_dialog_clip(qtbot):
+    from downloader.ui.dialogs import FormatDialog
+    info = VideoInfo("https://www.youtube.com/watch?v=aqz-KE-bpKQ", "Bunny", "", 596, FORMATS)
+    dialog = FormatDialog(info, "D:/v", "720p", False, clip_url=info.url + "&t=60")
+    qtbot.addWidget(dialog)
+    assert dialog.clip() is None
+    dialog.clip_fields.toggle.setChecked(True)
+    dialog.clip_fields.to_edit.setText("2:30")
+    assert dialog.clip() == (60, 150)

@@ -9,8 +9,9 @@ from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabe
 
 from ..engine.linkkind import LinkKind, classify
 from ..engine.probe import FileInfo, probe
-from ..engine.youtube import (PlaylistInfo, QUALITIES, VideoInfo, choose_format, estimate_playlist_size,
-                              fetch_info)
+from ..engine.youtube import (PlaylistInfo, QUALITIES, VideoInfo, choose_format, clip_size,
+                              estimate_playlist_size, fetch_info)
+from .clip_fields import ClipFields
 from .dialogs import FormatDialog, PlaylistDialog
 from .elided import ElidedLabel
 from .formatting import fmt_bytes, fmt_duration
@@ -71,7 +72,10 @@ class SmartBar(QWidget):
         meta_row = QHBoxLayout()
         meta_row.setSpacing(8)
         meta_row.addWidget(self._meta, 1)
+        self.clip = ClipFields()
+        self.clip.changed.connect(self._render)
         meta_row.addWidget(self._more)
+        meta_row.addWidget(self.clip.toggle)
         meta_row.addWidget(self._choose)
         text_col = QVBoxLayout()
         text_col.setSpacing(3)
@@ -101,14 +105,18 @@ class SmartBar(QWidget):
         self.action.setCursor(Qt.PointingHandCursor)
         self.action.clicked.connect(self._download)
 
-        opt = QHBoxLayout(self.options)
-        opt.setContentsMargins(14, 12, 14, 12)
+        opt = QHBoxLayout()
         opt.setSpacing(14)
         opt.addWidget(self._thumb)
         opt.addLayout(text_col, 1)
         opt.addWidget(self.quality_group)
         opt.addLayout(size_col)
         opt.addWidget(self.action)
+        box = QVBoxLayout(self.options)
+        box.setContentsMargins(14, 12, 14, 12)
+        box.setSpacing(10)
+        box.addLayout(opt)
+        box.addWidget(self.clip)
 
         frame_layout = QVBoxLayout(frame)
         frame_layout.setContentsMargins(0, 0, 0, 0)
@@ -170,6 +178,7 @@ class SmartBar(QWidget):
             self._set_state("file")
         elif isinstance(result, VideoInfo):
             self._video = result
+            self.clip.set_video(result.duration, self.input.text().strip())
             self._set_state("video")
         elif isinstance(result, PlaylistInfo):
             self._playlist = result
@@ -193,7 +202,8 @@ class SmartBar(QWidget):
         if self.state == "file":
             self.ctl.add_file(self._file)
         elif self.state == "video":
-            self.ctl.add_video(self._video, choose_format(self._video.formats, self._quality))
+            self.ctl.add_video(self._video, choose_format(self._video.formats, self._quality),
+                               clip=self.clip.clip())
         elif self.state == "playlist":
             self.ctl.add_playlist(self._playlist, self._quality, sorted(self._picked))
         else:
@@ -207,10 +217,11 @@ class SmartBar(QWidget):
 
     def _open_formats(self) -> None:
         s = self.ctl.settings
-        dialog = FormatDialog(self._video, s.folder_video, self._quality, s.subtitles, self.window())
+        dialog = FormatDialog(self._video, s.folder_video, self._quality, s.subtitles, self.window(),
+                              clip_url=self.input.text().strip())
         if dialog.exec() == QDialog.Accepted:
             self.ctl.add_video(self._video, dialog.selected_option(), folder=dialog.folder(),
-                               subtitles=dialog.subtitles(), start_now=dialog.start_now())
+                               subtitles=dialog.subtitles(), start_now=dialog.start_now(), clip=dialog.clip())
             self._clear()
 
     def _open_playlist(self) -> None:
@@ -235,10 +246,13 @@ class SmartBar(QWidget):
         self.hint.setText(hints.get(state, HINT_IDLE if s.watch_clipboard else HINT_IDLE_NO_WATCH))
         self.badge.setText({"checking": "Checking…", "error": "Can't use this link"}.get(state, ""))
         if not showing:
+            self.clip.setVisible(False)
             return
 
         self.quality_group.setVisible(state != "file")
         self._more.setVisible(state == "video")
+        self.clip.toggle.setVisible(state == "video")
+        self.clip.setVisible(state == "video" and self.clip.on())
         self._choose.setVisible(state == "playlist")
         self.action.setEnabled(True)
         if state == "file":
@@ -257,6 +271,12 @@ class SmartBar(QWidget):
             choice = choose_format(v.formats, self._quality)
             size = fmt_bytes(choice.size) or "Size unknown"
             note = choice.note or ("M4A sound" if self._quality == "Audio" else "MP4")
+            clip = self.clip.clip()
+            if clip:
+                estimate = clip_size(choice.size, v.duration, *clip)
+                size = f"≈ {fmt_bytes(estimate)}" if estimate else "Size unknown"
+                note = "clip · estimate"
+            self.action.setEnabled(self.clip.problem() is None)
             action = "Download"
         else:
             pl = self._playlist

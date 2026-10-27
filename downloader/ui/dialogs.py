@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QFileDialog, QH
                                QVBoxLayout)
 
 from ..engine.youtube import FormatOption, PlaylistInfo, VideoInfo, format_options
+from .clip_fields import ClipFields
 from .formatting import fmt_bytes, fmt_duration
 
 
@@ -41,7 +42,8 @@ def _buttons(dialog: QDialog, ok_text: str) -> QHBoxLayout:
 
 
 class FormatDialog(QDialog):
-    def __init__(self, info: VideoInfo, folder: str, quality: str, subtitles: bool, parent=None):
+    def __init__(self, info: VideoInfo, folder: str, quality: str, subtitles: bool, parent=None,
+                 clip_url: str | None = None):
         super().__init__(parent)
         self.setWindowTitle("Download video")
         self.setMinimumWidth(560)
@@ -70,6 +72,14 @@ class FormatDialog(QDialog):
         if self._group.checkedButton() is None and self._group.buttons():
             self._group.buttons()[0].setChecked(True)
 
+        self.clip_fields = ClipFields()
+        self.clip_fields.set_video(info.duration, clip_url or info.url)
+        clip_row = QHBoxLayout()
+        clip_row.addWidget(self.clip_fields.toggle)
+        clip_row.addWidget(self.clip_fields, 1)
+        clip_row.addStretch(0)
+        layout.addLayout(clip_row)
+
         layout.addWidget(QLabel("Save to", objectName="panelLabel"))
         row = QHBoxLayout()
         self._folder = QLineEdit(folder, objectName="field")
@@ -94,6 +104,13 @@ class FormatDialog(QDialog):
         folder = QFileDialog.getExistingDirectory(self, "Save to", self._folder.text())
         if folder:
             self._folder.setText(folder)
+
+    def accept(self) -> None:
+        if self.clip_fields.problem() is None:  # the problem is shown next to the fields
+            super().accept()
+
+    def clip(self) -> tuple[int, int] | None:
+        return self.clip_fields.clip()
 
     def selected_option(self) -> FormatOption:
         chosen = self._group.checkedButton().property("option_id")
