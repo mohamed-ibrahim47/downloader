@@ -25,6 +25,7 @@ class ClipFields(QWidget):
         self.to_edit = QLineEdit(objectName="clipTo")
         for edit, name in ((self.from_edit, "From"), (self.to_edit, "To")):
             edit.setAccessibleName(f"Clip {name.lower()}")
+            edit.setProperty("role", "field")
             edit.setFixedWidth(84)
             edit.textChanged.connect(self._edited)
         self.from_edit.setPlaceholderText("start")

@@ -96,7 +96,8 @@ QPushButton#primaryButton:disabled {{ background: {c['border']}; color: {c['mute
 QPushButton#linkButton {{ border: none; background: transparent; color: {c['accent']}; font-size: 12px; padding: 0; }}
 QPushButton#clipToggle {{ border: 1px solid {c['border']}; border-radius: 9px; background: transparent; color: {c['accent']}; font-size: 12px; padding: 1px 9px; }}
 QPushButton#clipToggle:checked {{ background: {c['accent']}; border-color: {c['accent']}; color: {c['bg']}; }}
-QLabel#clipProblem {{ color: {c['error']}; font-size: 12px; }}
+QLabel#clipProblem, QLabel#checksumNote[bad="true"] {{ color: {c['error']}; font-size: 12px; }}
+QLabel#checksumNote, QLabel#notice {{ color: {c['muted']}; font-size: 12px; }}
 QPushButton#secondaryButton {{ min-height: 34px; padding: 0 14px; border: 1px solid {c['border']};
     border-radius: 10px; background: {c['surface']}; }}
 

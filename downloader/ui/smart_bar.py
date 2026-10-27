@@ -154,6 +154,7 @@ class SmartBar(QWidget):
         self._sum_input = QLineEdit(objectName="checksumInput")
         self._sum_input.setPlaceholderText("Paste the SHA-256, SHA-1 or MD5 the site gives")
         self._sum_input.setAccessibleName("Checksum")
+        self._sum_input.setProperty("role", "field")
         self._sum_input.textChanged.connect(lambda _t: self._render())
         self._sum_note = _plain("checksumNote")
         row = QHBoxLayout(self._sum_row)
@@ -270,7 +271,19 @@ class SmartBar(QWidget):
         self._quality = button.text()
         self._render()
 
+    def _blocked(self) -> bool:
+        """A pasted checksum that isn't one, or a clip range that doesn't work: nothing may be
+        queued (whichever button asks), or it would download unchecked or whole."""
+        if self.state == "file":
+            text = self._sum_input.text().strip()
+            return bool(text) and parse_checksum(text) is None
+        if self.state == "video":
+            return self.clip.problem() is not None
+        return False
+
     def _download(self) -> None:
+        if self._blocked():
+            return
         if self.state == "file":
             pasted = parse_checksum(self._sum_input.text()) if self._sum_input.text().strip() else None
             if pasted:
@@ -401,6 +414,7 @@ class SmartBar(QWidget):
             self._notice.setText("Already in your list")
         self._open_existing.setVisible(found.finished)
         self._again.setVisible(found.finished)
+        self._again.setEnabled(not self._blocked())
         self._show_it.setVisible(not found.finished)
 
     def _render_checksum(self) -> None:
@@ -414,5 +428,10 @@ class SmartBar(QWidget):
         else:
             note = ""
         self._sum_note.setText(note)
+        bad = note == BAD_CHECKSUM
+        if self._sum_note.property("bad") != bad:
+            self._sum_note.setProperty("bad", bad)
+            self._sum_note.style().unpolish(self._sum_note)
+            self._sum_note.style().polish(self._sum_note)
         self._sum_note.setVisible(bool(note))
         self._sum_row.setVisible(bool(note) or not self._sum_input.isHidden())

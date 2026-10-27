@@ -390,3 +390,25 @@ def test_new_link_clears_pasted_checksum(bar, qtbot, monkeypatch):
     _sum_field(bar).setText(H)
     _file(bar, qtbot, monkeypatch, url="https://e.com/b.zip")
     assert _sum_field(bar).text() == "" and not _sum_field(bar).isVisible()
+
+
+def test_download_again_respects_invalid_checksum(bar, qtbot, monkeypatch, tmp_path):
+    _have(bar, tmp_path, "https://e.com/a.zip", "a.zip")
+    _file(bar, qtbot, monkeypatch)
+    qtbot.mouseClick(_button(bar, "check with checksum…"), Qt.LeftButton)
+    _sum_field(bar).setText("not a hash")
+    before = len(bar.ctl.downloads())
+    assert not _button(bar, "Download again").isEnabled()
+    bar._download()  # even if called directly, nothing unchecked is queued
+    assert len(bar.ctl.downloads()) == before
+
+
+def test_download_again_respects_invalid_clip(bar, qtbot, monkeypatch, tmp_path):
+    _have(bar, tmp_path, BUNNY, "Bunny.mp4", kind=Kind.VIDEO, video_id="aqz-KE-bpKQ")
+    _video(bar, qtbot, monkeypatch)
+    bar.clip.toggle.setChecked(True)
+    bar.clip.to_edit.setText("1:00")
+    bar.clip.from_edit.setText("2:00")  # From after To; the full-video notice may show meanwhile
+    before = len(bar.ctl.downloads())
+    bar._download()
+    assert len(bar.ctl.downloads()) == before
