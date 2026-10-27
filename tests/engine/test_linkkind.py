@@ -23,3 +23,19 @@ from downloader.engine.linkkind import LinkKind, classify
 ])
 def test_classify(url, kind):
     assert classify(url) is kind
+
+
+@pytest.mark.parametrize("url", ["https://www.youtube.com/watch?v=aqz-KE-bpKQ", "https://youtu.be/aqz-KE-bpKQ?si=x",
+                                 "https://www.youtube.com/shorts/aqz-KE-bpKQ",
+                                 "https://m.youtube.com/watch?v=aqz-KE-bpKQ&list=PL1&t=5",
+                                 "https://music.youtube.com/watch?v=aqz-KE-bpKQ"])
+def test_video_id(url):
+    from downloader.engine.linkkind import video_id
+    assert video_id(url) == "aqz-KE-bpKQ"
+
+
+def test_video_id_none():
+    from downloader.engine.linkkind import video_id
+    assert video_id("https://example.com/a.zip") is None
+    assert video_id("https://www.youtube.com/playlist?list=PL1") is None
+    assert video_id("not a link") is None

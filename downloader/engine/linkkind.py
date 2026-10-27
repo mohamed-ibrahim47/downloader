@@ -39,3 +39,16 @@ def classify(text: str) -> LinkKind:
             return LinkKind.PLAYLIST
         return LinkKind.INVALID
     return LinkKind.FILE
+
+
+def video_id(url: str) -> str | None:
+    """The YouTube video id, whatever form the link takes; None for anything else."""
+    if classify(url) is not LinkKind.VIDEO:
+        return None
+    parts = urlsplit(url.strip())
+    path = parts.path.strip("/")
+    if parts.hostname.lower() == "youtu.be":
+        return path.split("/")[0] or None
+    if path.startswith("shorts/"):
+        return path.split("/")[1] or None
+    return parse_qs(parts.query)["v"][0]
