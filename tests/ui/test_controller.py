@@ -156,3 +156,85 @@ def test_apply_settings_sets_limit_and_concurrency(ctl):
     ctl.apply_settings(s)
     assert ctl.limiter.rate == 102_400
     assert ctl.queue._max_active == 1
+
+
+# ---- clips, checksums, already have it ----------------------------------------
+
+import hashlib
+
+from downloader.engine.checksum import Checksum
+from downloader.engine.history import Existing
+
+BUNNY = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+
+
+def test_add_video_clip_name_size_and_id(ctl):
+    d = ctl.add_video(VideoInfo(BUNNY, "Title", "", 596, []),
+                      FormatChoice("best", 720, 48_200_000, None, "mp4"), clip=(750, 900))
+    assert (d.filename, d.clip, d.video_id, d.size) == ("Title (12-30 to 15-00).mp4", (750, 900), "aqz-KE-bpKQ",
+                                                         12_130_872)
+
+
+def test_add_video_without_clip_keeps_full_size(ctl):
+    d = ctl.add_video(VideoInfo(BUNNY, "Title", "", 596, []), FormatChoice("best", 720, 48_200_000, None, "mp4"))
+    assert (d.filename, d.clip, d.size, d.video_id) == ("Title.mp4", None, 48_200_000, "aqz-KE-bpKQ")
+
+
+def test_audio_clip_is_m4a(ctl):
+    d = ctl.add_video(VideoInfo(BUNNY, "Title", "", 596, []),
+                      FormatChoice("bestaudio", None, 3_400_000, None, "m4a"), clip=(0, 60))
+    assert d.filename == "Title (0-00 to 1-00).m4a"
+
+
+def test_add_file_stores_checksum(ctl):
+    c = Checksum("sha256", hashlib.sha256(b"x").hexdigest())
+    d = ctl.add_file(FileInfo("https://e.com/a.zip", "a.zip", 1, True), checksum=c, checksum_source="SHA256SUMS")
+    assert d.checksum == str(c) and d.checksum_source == "SHA256SUMS"
+    assert ctl.store.get(d.id).checksum == str(c)
+
+
+def test_playlist_items_carry_video_id(ctl):
+    info = PlaylistInfo("https://www.youtube.com/playlist?list=PL1", "PL",
+                        [PlaylistEntry(1, "https://www.youtube.com/watch?v=AAAAAAAAAAA", "A", 60)])
+    [d] = ctl.add_playlist(info, "720p", [1])
+    assert d.video_id == "AAAAAAAAAAA"
+
+
+def test_existing_and_already_have(ctl):
+    d = ctl.add_file(FileInfo("https://e.com/a.zip", "a.zip", 1, True))
+    assert ctl.existing("https://e.com/a.zip#x") == Existing(d, False)
+    assert ctl.existing("https://e.com/b.zip") is None
+    v = ctl.add_video(VideoInfo(BUNNY, "Bunny", "", 596, []), FormatChoice("best", 720, 1, None, "mp4"))
+    v.status = Status.COMPLETED
+    Path(v.folder).mkdir(parents=True, exist_ok=True)
+    v.target_path.write_bytes(b"v")
+    info = PlaylistInfo("u", "PL", [PlaylistEntry(1, BUNNY, "Bunny", 596),
+                                    PlaylistEntry(2, "https://www.youtube.com/watch?v=BBBBBBBBBBB", "B", 9)])
+    assert ctl.already_have(info) == {1}
+
+
+def test_keep_both_clears_note(ctl, qtbot):
+    d = ctl.add_file(FileInfo("https://e.com/a.zip", "a.zip", 1, True))
+    d.duplicate_of = "b.zip"
+    with qtbot.waitSignal(ctl.changed):
+        ctl.keep_both(d.id)
+    assert d.duplicate_of is None and ctl.store.get(d.id).duplicate_of is None
+
+
+def test_delete_copy_removes_and_deletes(ctl, qtbot):
+    d = ctl.add_file(FileInfo("https://e.com/a.zip", "a.zip", 1, True))
+    ctl.queue.pause(d.id)
+    d.status, d.duplicate_of = Status.COMPLETED, "b.zip"
+    Path(d.folder).mkdir(parents=True, exist_ok=True)
+    d.target_path.write_bytes(b"x")
+    with qtbot.waitSignal(ctl.removed, timeout=3000):
+        ctl.delete_copy(d.id)
+    assert not d.target_path.exists() and ctl.get(d.id) is None
+
+
+def test_redownload_runs_in_background(ctl, qtbot):
+    d = ctl.add_file(FileInfo("https://e.com/a.zip", "a.zip", 1, True))
+    ctl.queue.pause(d.id)
+    d.status = Status.FAILED
+    ctl.redownload(d.id)
+    qtbot.waitUntil(lambda: d.status in (Status.QUEUED, Status.DOWNLOADING), timeout=3000)

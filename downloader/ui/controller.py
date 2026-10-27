@@ -10,7 +10,10 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 
+from ..engine.checksum import Checksum
+from ..engine.history import Existing, already_have, find_existing
 from ..engine.http_job import HttpJob
+from ..engine.linkkind import video_id
 from ..engine.models import Download, Kind, Status
 from ..engine.paths import safe_filename
 from ..engine.probe import FileInfo
@@ -19,8 +22,9 @@ from ..engine.ratelimit import TokenBucket
 from ..engine.settings import Settings
 from ..engine.speed import SpeedMeter
 from ..engine.store import Store
+from ..engine.timecode import clip_suffix
 from ..engine.youtube import (MB_PER_MINUTE, FormatChoice, FormatOption, PlaylistInfo, VideoInfo,
-                              YouTubeJob, selector_for)
+                              YouTubeJob, clip_size, selector_for)
 
 CARD_UPDATE_EVERY = 0.1  # at most 10 updates a second per card
 
@@ -91,15 +95,19 @@ class Controller(QObject):
 
     # ---- adding -------------------------------------------------------------
 
-    def add_file(self, info: FileInfo, folder: str | None = None) -> Download:
+    def add_file(self, info: FileInfo, folder: str | None = None, checksum: Checksum | None = None,
+                 checksum_source: str | None = None) -> Download:
         folder = folder or self.settings.folder_general
         d = Download(url=info.url, kind=Kind.FILE, filename=self.queue.unique_name(folder, info.filename),
                      folder=folder, size=info.size, resumable=info.resumable,
-                     connections=self.settings.connections)
+                     connections=self.settings.connections,
+                     checksum=str(checksum) if checksum else None,
+                     checksum_source=checksum_source if checksum else None)
         return self.queue.add(d)
 
     def add_video(self, info: VideoInfo, choice: FormatChoice | FormatOption, folder: str | None = None,
-                  subtitles: bool | None = None, start_now: bool = False) -> Download:
+                  subtitles: bool | None = None, start_now: bool = False,
+                  clip: tuple[int, int] | None = None) -> Download:
         folder = folder or self.settings.folder_video
         if isinstance(choice, FormatOption):
             quality = "Audio" if choice.id in ("m4a", "mp3") else choice.quality
@@ -108,11 +116,15 @@ class Controller(QObject):
         else:
             quality = f"{choice.height}p" if choice.height else "Audio"
             ext, note, audio_format = choice.ext, choice.note, choice.audio_format
-        name = self.queue.unique_name(folder, f"{safe_filename(info.title)}.{ext}", by_stem=True)
-        d = Download(url=info.url, kind=Kind.VIDEO, filename=name, folder=folder, size=choice.size,
+        suffix = clip_suffix(*clip) if clip else ""
+        name = self.queue.unique_name(folder, f"{safe_filename(info.title)}{suffix}.{ext}", by_stem=True)
+        size = clip_size(choice.size, info.duration, *clip) if clip else choice.size
+        d = Download(url=info.url, kind=Kind.VIDEO, filename=name, folder=folder, size=size,
                      resumable=True, quality=quality, format_selector=choice.selector, note=note,
                      audio_format=audio_format, title=info.title,
-                     subtitles=self.settings.subtitles if subtitles is None else subtitles)
+                     subtitles=self.settings.subtitles if subtitles is None else subtitles,
+                     video_id=video_id(info.url), clip_start=clip[0] if clip else None,
+                     clip_end=clip[1] if clip else None)
         self.queue.add(d)
         if start_now:
             self.queue.start_now(d.id)
@@ -137,8 +149,16 @@ class Controller(QObject):
             batch.append(Download(url=e.url, kind=Kind.PLAYLIST_ITEM, filename=name, folder=folder, size=size,
                                   resumable=True, quality=quality, format_selector=selector_for(quality),
                                   title=e.title, playlist_title=info.title, playlist_index=e.index,
-                                  subtitles=self.settings.subtitles))
+                                  subtitles=self.settings.subtitles, video_id=video_id(e.url)))
         return self.queue.add_many(batch)
+
+    # ---- what you already have ----------------------------------------------
+
+    def existing(self, url: str, clip: tuple[int, int] | None = None) -> Existing | None:
+        return find_existing(self.downloads(), url, clip)
+
+    def already_have(self, info: PlaylistInfo) -> set[int]:
+        return already_have(self.downloads(), info.entries)
 
     # ---- acting -------------------------------------------------------------
 
@@ -171,6 +191,22 @@ class Controller(QObject):
 
     def remove(self, download_id: int, delete_file: bool = False) -> None:
         self._background(self.queue.remove, download_id, delete_file)
+
+    def redownload(self, download_id: int) -> None:
+        """Delete a damaged download's file and fetch it again (the window asks first)."""
+        self._background(self.queue.redownload, download_id)
+
+    def keep_both(self, download_id: int) -> None:
+        d = self.get(download_id)
+        if d is None:
+            return
+        d.duplicate_of = None
+        self.store.update(d)
+        self.changed.emit(download_id)
+
+    def delete_copy(self, download_id: int) -> None:
+        """Remove a download that turned out identical to a file already there, and its file."""
+        self._background(self.queue.remove, download_id, True)
 
     def start_queue(self) -> None:
         self.queue.resume_all()
