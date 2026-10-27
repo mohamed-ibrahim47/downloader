@@ -57,6 +57,16 @@ connections are handled by backing off to one at a time.
 A name that's taken gets ` (2)`. Network drops are retried by themselves. Errors are written for
 people: *"server refused (403) · link may have expired"*, with a **Retry** button.
 
+### Knows what you already have
+Paste a link you downloaded last week and it says so, with **Open folder** right there, even
+when it's the same YouTube video under a different link. A file that turns out identical to one
+already in the folder is pointed out, with **Delete this copy** or **Keep both**.
+
+### Checks the file arrived intact
+Paste a checksum (SHA-256, SHA-1 or MD5), or let the app find the `SHA256SUMS` a site publishes
+next to the file. Once downloaded, the card says **✓ SHA-256 verified**, or warns that the file
+may be damaged and keeps it aside.
+
   </td>
   <td width="50%" valign="top">
     <img src="screenshots/formats.png" alt="The full list of formats for a video, with sizes">
@@ -76,6 +86,11 @@ M4A, and MP3.
 
 ### Subtitles, too
 Turn them on in Settings and they're saved next to each video.
+
+### Just the part you want
+Switch on **Clip** and download only minutes 12:30–15:00 of a long video. A link shared with a
+start time (`&t=750`) fills in **From** by itself. Cuts are exact, and the file is named
+`Title (12-30 to 15-00).mp4`.
 
   </td>
   </tr>
