@@ -59,7 +59,21 @@ class Download:
     title: str | None = None
     playlist_title: str | None = None
     playlist_index: int | None = None
+    clip_start: int | None = None  # seconds; a clip of a video when both are set
+    clip_end: int | None = None
+    video_id: str | None = None
+    checksum: str | None = None  # "sha256:<hex>"
+    checksum_source: str | None = None  # "pasted" or the sums file it came from
+    verified: bool = False
+    checking: bool = False  # hashing the finished file
+    duplicate_of: str | None = None  # an identical file already in the folder
     segments: list[Segment] = field(default_factory=list)
+
+    @property
+    def clip(self) -> tuple[int, int] | None:
+        if self.clip_start is None or self.clip_end is None:
+            return None
+        return self.clip_start, self.clip_end
 
     @property
     def target_path(self) -> Path:

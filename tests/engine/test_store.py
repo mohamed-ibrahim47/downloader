@@ -103,3 +103,53 @@ def test_download_paths_and_host():
     assert d.part_path.name == "a.zip.part"
     assert d.target_path.name == "a.zip"
     assert d.host == "cdn.example.com"
+
+
+OLD_COLUMNS = ["url", "kind", "filename", "folder", "size", "status", "resumable", "connections", "added_at",
+               "finished_at", "error", "note", "downloaded", "quality", "format_selector", "audio_format",
+               "subtitles", "title", "playlist_title", "playlist_index"]
+
+
+def test_old_database_upgrades_in_place(tmp_path):
+    import sqlite3
+
+    db = sqlite3.connect(tmp_path / "db.sqlite")
+    db.execute(f"CREATE TABLE downloads (id INTEGER PRIMARY KEY, {', '.join(OLD_COLUMNS)}, segments TEXT)")
+    db.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+    db.execute("INSERT INTO downloads (url, kind, filename, folder, status, resumable, connections, added_at, "
+               "downloaded, subtitles, segments) VALUES ('https://x/a.zip','file','a.zip','D:/dl','completed',1,8,"
+               "1.0,5,0,'[]')")
+    db.commit()
+    db.close()
+    store = Store(tmp_path / "db.sqlite")
+    d = store.get(1)
+    assert (d.filename, d.status, d.downloaded, d.resumable) == ("a.zip", Status.COMPLETED, 5, True)
+    assert (d.clip_start, d.video_id, d.checksum, d.verified, d.checking, d.duplicate_of) == \
+        (None, None, None, False, False, None)
+    d.verified = True
+    store.update(d)
+    assert store.get(1).verified is True
+    assert len(store.all()) == 1
+
+
+def test_new_fields_roundtrip(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    d = _download(clip_start=750, clip_end=900, video_id="aqz-KE-bpKQ", checksum="sha256:" + "ab" * 32,
+                  checksum_source="SHA256SUMS", verified=True, duplicate_of="setup.zip")
+    store.add(d)
+    assert store.get(d.id) == d
+
+
+def test_open_clears_checking(tmp_path):
+    path = tmp_path / "db.sqlite"
+    store = Store(path)
+    d = _download(status=Status.DOWNLOADING, checking=True)
+    store.add(d)
+    store.close()
+    got = Store(path).get(d.id)
+    assert got.status is Status.PAUSED and got.checking is False
+
+
+def test_clip_property():
+    assert _download(clip_start=750, clip_end=900).clip == (750, 900)
+    assert _download().clip is None

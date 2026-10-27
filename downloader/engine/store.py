@@ -11,7 +11,8 @@ from typing import Any
 from .models import Download, Kind, Segment, Status
 
 _COLUMNS = [f.name for f in fields(Download) if f.name not in ("id", "segments")]
-_SENTINEL = object()
+_BOOLS = ("resumable", "subtitles", "verified", "checking")
+_SELECT = "SELECT " + ", ".join(["id", *_COLUMNS, "segments"]) + " FROM downloads"
 
 
 class Store:
@@ -25,8 +26,17 @@ class Store:
         with self._db:
             self._db.execute(f"CREATE TABLE IF NOT EXISTS downloads (id INTEGER PRIMARY KEY, {cols}, segments TEXT)")
             self._db.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+            self._upgrade()
             # A download that was running when the app closed is now paused at its saved progress.
-            self._db.execute("UPDATE downloads SET status = ? WHERE status = ?", (Status.PAUSED.value, Status.DOWNLOADING.value))
+            self._db.execute("UPDATE downloads SET status = ?, checking = 0 WHERE status = ?",
+                             (Status.PAUSED.value, Status.DOWNLOADING.value))
+
+    def _upgrade(self) -> None:
+        """A database from an older version gains the newer columns (empty) in place."""
+        have = {row[1] for row in self._db.execute("PRAGMA table_info(downloads)")}
+        for name in _COLUMNS:
+            if name not in have:
+                self._db.execute(f"ALTER TABLE downloads ADD COLUMN {name}")
 
     def close(self) -> None:
         with self._lock:
@@ -46,8 +56,8 @@ class Store:
         data = dict(zip(["id", *_COLUMNS, "segments"], row))
         data["kind"] = Kind(data["kind"])
         data["status"] = Status(data["status"])
-        data["resumable"] = bool(data["resumable"])
-        data["subtitles"] = bool(data["subtitles"])
+        for name in _BOOLS:
+            data[name] = bool(data[name])
         data["segments"] = [Segment(**s) for s in json.loads(data["segments"] or "[]")]
         return Download(**data)
 
@@ -78,12 +88,12 @@ class Store:
 
     def get(self, download_id: int) -> Download | None:
         with self._lock:
-            row = self._db.execute("SELECT * FROM downloads WHERE id = ?", (download_id,)).fetchone()
+            row = self._db.execute(f"{_SELECT} WHERE id = ?", (download_id,)).fetchone()
         return self._from_row(row) if row else None
 
     def all(self) -> list[Download]:
         with self._lock:
-            rows = self._db.execute("SELECT * FROM downloads ORDER BY added_at DESC, id DESC").fetchall()
+            rows = self._db.execute(f"{_SELECT} ORDER BY added_at DESC, id DESC").fetchall()
         return [self._from_row(r) for r in rows]
 
     def delete(self, download_id: int) -> None:
