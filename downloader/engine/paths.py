@@ -64,6 +64,24 @@ def unique_path(folder: Path, name: str) -> Path:
         n += 1
 
 
+def same_size_files(folder: Path, size: int, exclude: Path) -> list[Path]:
+    """Finished files in `folder` of exactly `size` bytes (unfinished .part files don't count)."""
+    try:
+        entries = list(Path(folder).iterdir())
+    except OSError:
+        return []
+    found = []
+    for p in sorted(entries):
+        if p == exclude or p.suffix == ".part":
+            continue
+        try:
+            if p.is_file() and p.stat().st_size == size:
+                found.append(p)
+        except OSError:
+            continue
+    return found
+
+
 def disk_usage(folder: Path):
     """`shutil.disk_usage` for the drive holding `folder`, which may not exist yet."""
     folder = Path(folder)

@@ -47,3 +47,12 @@ def test_unique_path_adds_suffix(tmp_path):
 
 def test_unique_path_free_name_unchanged(tmp_path):
     assert unique_path(tmp_path, "b.zip") == tmp_path / "b.zip"
+
+
+def test_same_size_files(tmp_path):
+    from downloader.engine.paths import same_size_files
+    for name, data in (("a.zip", b"12345"), ("b.zip", b"abcde"), ("c.zip", b"123456"), ("d.zip.part", b"12345")):
+        (tmp_path / name).write_bytes(data)
+    (tmp_path / "sub").mkdir()
+    assert same_size_files(tmp_path, 5, tmp_path / "a.zip") == [tmp_path / "b.zip"]
+    assert same_size_files(tmp_path / "missing", 5, tmp_path / "a.zip") == []
