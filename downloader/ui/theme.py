@@ -98,6 +98,7 @@ QPushButton#secondaryButton {{ min-height: 34px; padding: 0 14px; border: 1px so
     border-radius: 10px; background: {c['surface']}; }}
 
 DownloadCard {{ background: {c['surface']}; border: 1px solid {c['cardBorder']}; border-radius: 12px; }}
+DownloadCard[highlight="true"] {{ border: 2px solid {c['accent']}; }}
 QLabel#cardIconBox {{ background: {c['surface2']}; border-radius: 10px; }}
 QLabel#cardName {{ font-size: 14px; font-weight: 600; }}
 QLabel#cardMeta, QLabel#cardDetail {{ color: {c['muted']}; font-size: 12px; }}

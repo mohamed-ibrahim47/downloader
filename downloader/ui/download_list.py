@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from datetime import date, datetime
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from ..engine.models import Download, Kind, Status
@@ -14,6 +14,8 @@ from .icons import icon
 
 FILTERS = ("all", "active", "queued", "completed")
 
+HIGHLIGHT_MS = 1500
+
 
 def _today(d: Download) -> bool:
     return bool(d.finished_at) and datetime.fromtimestamp(d.finished_at).date() == date.today()
@@ -22,6 +24,8 @@ def _today(d: Download) -> bool:
 class DownloadList(QScrollArea):
     primary_clicked = Signal(int)
     remove_clicked = Signal(int)
+    delete_copy_clicked = Signal(int)
+    keep_both_clicked = Signal(int)
 
     def __init__(self, controller, palette: dict[str, str], parent=None):
         super().__init__(parent)
@@ -64,6 +68,8 @@ class DownloadList(QScrollArea):
         card = DownloadCard(d, self._palette)
         card.primary_clicked.connect(self.primary_clicked)
         card.remove_clicked.connect(self.remove_clicked)
+        card.delete_copy_clicked.connect(self.delete_copy_clicked)
+        card.keep_both_clicked.connect(self.keep_both_clicked)
         self._cards[d.id] = card
         return card
 
@@ -76,6 +82,25 @@ class DownloadList(QScrollArea):
         card.update_from(d, *self.ctl.speed_of(download_id))
         if before != d.status.value or card.parent() is None:
             self.refresh()
+
+    def reveal(self, download_id: int) -> bool:
+        """Scroll to a card and outline it briefly. False if the current filter hides it."""
+        card = self._cards.get(download_id)
+        if card is None or card.parent() is None or card.isHidden():
+            return False
+        self.ensureWidgetVisible(card)
+        self._set_highlight(card, True)
+        QTimer.singleShot(HIGHLIGHT_MS, lambda: self._set_highlight(card, False))
+        return True
+
+    @staticmethod
+    def _set_highlight(card: DownloadCard, on: bool) -> None:
+        try:
+            card.setProperty("highlight", on)
+            card.style().unpolish(card)
+            card.style().polish(card)
+        except RuntimeError:
+            pass  # the card was removed meanwhile
 
     def remove_download(self, download_id: int) -> None:
         card = self._cards.pop(download_id, None)

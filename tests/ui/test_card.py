@@ -131,3 +131,79 @@ def test_card_primary_emits_id(qtbot):
     with qtbot.waitSignal(card.remove_clicked) as sig:
         qtbot.mouseClick(remove, Qt.LeftButton)
     assert sig.args == [7]
+
+
+# ---- checking, verified, clips, identical copies --------------------------------
+
+import datetime
+
+from PySide6.QtWidgets import QPushButton
+
+from downloader.ui.card import status_texts
+from downloader.ui.formatting import fmt_day
+
+SHA = "sha256:" + "ab" * 32
+
+
+def test_status_checking():
+    status, _ = status_texts(_d(checking=True, downloaded=5_800_000_000), None, None)
+    assert status == "Checking the file…"
+
+
+def test_status_verified():
+    _, detail = status_texts(_d(status=Status.COMPLETED, verified=True, checksum=SHA), None, None)
+    assert detail.endswith("· ✓ SHA-256 verified")
+    _, detail = status_texts(_d(status=Status.COMPLETED, verified=True, checksum="md5:" + "a" * 32), None, None)
+    assert detail.endswith("· ✓ MD5 verified")
+
+
+def test_status_paused_clip():
+    d = _d(kind=Kind.VIDEO, status=Status.PAUSED, clip_start=750, clip_end=900, downloaded=100)
+    assert "will start over · clips can't resume" in status_texts(d, None, None)[1]
+
+
+def test_status_duplicate():
+    _, detail = status_texts(_d(status=Status.COMPLETED, duplicate_of="setup.zip"), None, None)
+    assert detail == "Same as setup.zip, which was already in this folder"
+
+
+def test_card_meta_shows_clip(qtbot):
+    card = _card(qtbot, _d(kind=Kind.VIDEO, quality="720p", clip_start=750, clip_end=900))
+    assert "Clip 12:30–15:00 · 720p" in _text(card, "cardMeta")
+
+
+def _links(card):
+    return {b.text(): b for b in card.findChildren(QPushButton)}
+
+
+def test_duplicate_links_visible_only_with_note(qtbot):
+    card = _card(qtbot, _d(status=Status.COMPLETED))
+    card.show()
+    assert not _links(card)["Delete this copy"].isVisible()
+    d = _d(status=Status.COMPLETED, duplicate_of="setup.zip")
+    card.update_from(d)
+    links = _links(card)
+    assert links["Delete this copy"].isVisible() and links["Keep both"].isVisible()
+    with qtbot.waitSignal(card.delete_copy_clicked) as sig:
+        qtbot.mouseClick(links["Delete this copy"], Qt.LeftButton)
+    assert sig.args == [7]
+    with qtbot.waitSignal(card.keep_both_clicked):
+        qtbot.mouseClick(links["Keep both"], Qt.LeftButton)
+
+
+def test_card_with_duplicate_links_fits(qtbot):
+    card = _card(qtbot, _d(status=Status.COMPLETED, duplicate_of="a-very-long-name-for-an-installer-setup.zip"))
+    card.resize(900, 74)
+    card.show()
+    qtbot.waitExposed(card)
+    links = _links(card)
+    primary = _primary(card)
+    right = max(b.geometry().translated(b.parentWidget().mapTo(card, b.pos()) - b.pos()).right()
+                for b in links.values() if b.text() in ("Delete this copy", "Keep both"))
+    assert right < primary.geometry().left()
+
+
+def test_fmt_day():
+    now = datetime.datetime(2026, 10, 27, 12).timestamp()
+    assert fmt_day(datetime.datetime(2026, 10, 26, 9).timestamp(), now) == "26 Oct"
+    assert fmt_day(datetime.datetime(2025, 10, 26, 9).timestamp(), now) == "26 Oct 2025"

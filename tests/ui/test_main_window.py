@@ -119,3 +119,51 @@ def test_smoke_flag_exits_zero(tmp_path):
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "home" / "downloader.db").exists()
+
+
+# ---- confirmations and Show it ---------------------------------------------------
+
+from downloader.engine.errors import CHECKSUM_MISMATCH
+from downloader.ui import main_window as main_window_mod
+
+
+def _fail_with_mismatch(win, tmp_path):
+    d = next(x for x in win.ctl.downloads() if x.status is Status.PAUSED)
+    d.status, d.error, d.folder = Status.FAILED, CHECKSUM_MISMATCH, str(tmp_path)
+    d.part_path.write_bytes(b"damaged")
+    return d
+
+
+def test_retry_checksum_failure_asks_first(win, qtbot, monkeypatch, tmp_path):
+    d = _fail_with_mismatch(win, tmp_path)
+    calls = []
+    monkeypatch.setattr(win.ctl, "redownload", calls.append)
+    monkeypatch.setattr(main_window_mod, "confirm", lambda *a: False)
+    win.list.primary_clicked.emit(d.id)
+    assert calls == [] and d.part_path.exists()
+    monkeypatch.setattr(main_window_mod, "confirm", lambda *a: True)
+    win.list.primary_clicked.emit(d.id)
+    assert calls == [d.id]
+
+
+def test_delete_copy_asks_first(win, qtbot, monkeypatch):
+    d = next(x for x in win.ctl.downloads() if x.status is Status.COMPLETED)
+    d.duplicate_of = "other.zip"
+    calls = []
+    monkeypatch.setattr(win.ctl, "delete_copy", calls.append)
+    monkeypatch.setattr(main_window_mod, "confirm", lambda *a: False)
+    win.list.delete_copy_clicked.emit(d.id)
+    assert calls == []
+    monkeypatch.setattr(main_window_mod, "confirm", lambda *a: True)
+    win.list.delete_copy_clicked.emit(d.id)
+    assert calls == [d.id]
+
+
+def test_show_download_switches_to_all(win, qtbot):
+    qtbot.mouseClick(_chip(win, "Completed"), Qt.LeftButton)
+    queued = next(d.id for d in win.ctl.downloads() if d.status is Status.QUEUED)
+    win.show_download(queued)
+    assert _chip(win, "All").isChecked() and win.list.mode == "all"
+    card = win.list._cards[queued]
+    assert card.isVisibleTo(win) and card.property("highlight") is True
+    qtbot.waitUntil(lambda: card.property("highlight") is False, timeout=3000)

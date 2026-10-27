@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QFileDialog, QHBoxLayout, QLabel,
-                               QLineEdit, QListWidget, QListWidgetItem, QPushButton, QRadioButton,
+                               QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QRadioButton,
                                QVBoxLayout)
 
 from ..engine.youtube import FormatOption, PlaylistInfo, VideoInfo, format_options
@@ -14,6 +14,17 @@ def _plain(text: str, name: str = "") -> QLabel:
     label = QLabel(text, objectName=name)
     label.setTextFormat(Qt.PlainText)
     return label
+
+
+def confirm(parent, title: str, text: str, yes_text: str) -> bool:
+    """Ask before doing something that can't be undone. The text holds file names from servers,
+    so it is shown as plain text, never HTML. No is the default."""
+    box = QMessageBox(QMessageBox.Question, title, text, parent=parent)
+    box.setTextFormat(Qt.PlainText)
+    yes = box.addButton(yes_text, QMessageBox.YesRole)
+    box.setDefaultButton(box.addButton("Cancel", QMessageBox.NoRole))
+    box.exec()
+    return box.clickedButton() is yes
 
 
 def _buttons(dialog: QDialog, ok_text: str) -> QHBoxLayout:

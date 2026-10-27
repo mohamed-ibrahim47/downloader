@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import time
 
 
 def plain_tip(text: str) -> str:
@@ -45,3 +46,11 @@ def fmt_eta(seconds: float | None) -> str:
     if s < 3600:
         return f"about {s // 60} min left"
     return f"about {s // 3600} h {(s % 3600) // 60} min left"
+
+
+def fmt_day(ts: float, now: float | None = None) -> str:
+    """"26 Oct", with the year only when it isn't this year's."""
+    day = time.localtime(ts)
+    this_year = time.localtime(now if now is not None else time.time()).tm_year
+    text = f"{day.tm_mday} {time.strftime('%b', day)}"
+    return text if day.tm_year == this_year else f"{text} {day.tm_year}"

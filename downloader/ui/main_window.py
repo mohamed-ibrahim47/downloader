@@ -10,13 +10,15 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, 
                                QPushButton, QStackedWidget, QSystemTrayIcon, QToolButton, QVBoxLayout,
                                QWidget)
 
+from ..engine.errors import CHECKSUM_MISMATCH
 from ..engine.linkkind import LinkKind, classify
-from ..engine.models import Status
+from ..engine.models import Kind, Status
 from ..engine.power import sleep_pc
 from ..engine.scheduler import due_action
 from ..engine.settings import Settings
 from ..engine.store import Store
 from .controller import Controller
+from .dialogs import confirm
 from .download_list import DownloadList
 from .formatting import fmt_speed
 from .icons import icon, pixmap
@@ -85,8 +87,10 @@ class MainWindow(QMainWindow):
         self._sched_prev = datetime.now()
         self._sched_timer = QTimer(self, interval=30_000, timeout=self._scheduler_tick)
         self._sched_timer.start()
-        self.list.primary_clicked.connect(self.ctl.primary)
+        self.list.primary_clicked.connect(self._on_primary)
         self.list.remove_clicked.connect(self.ctl.remove)
+        self.list.delete_copy_clicked.connect(self._on_delete_copy)
+        self.list.keep_both_clicked.connect(self.ctl.keep_both)
 
         clipboard = QGuiApplication.clipboard()
         self._last_clip = clipboard.text().strip()  # don't grab whatever was copied before launch
@@ -191,6 +195,37 @@ class MainWindow(QMainWindow):
         else:
             pages = {"queue": self.queue_page, "scheduler": self.scheduler_page, "settings": self.settings_page}
             self.pages.setCurrentWidget(pages[key])
+
+    def _on_primary(self, download_id: int) -> None:
+        d = self.ctl.get(download_id)
+        damaged = (d is not None and d.status is Status.FAILED and d.error == CHECKSUM_MISMATCH
+                   and d.part_path.exists())
+        if not damaged:
+            self.ctl.primary(download_id)
+        elif confirm(self, "Download again", f"Delete the damaged {d.filename} and download it again?",
+                     "Delete and download"):
+            self.ctl.redownload(download_id)
+
+    def _on_delete_copy(self, download_id: int) -> None:
+        d = self.ctl.get(download_id)
+        if d is not None and confirm(
+                self, "Delete this copy",
+                f"Delete {d.filename}? It's the same as {d.duplicate_of}, which stays in the folder.",
+                "Delete this copy"):
+            self.ctl.delete_copy(download_id)
+
+    def show_download(self, download_id: int) -> None:
+        """Bring a download's card into view, clearing a filter that hides it."""
+        if self.list.reveal(download_id):
+            return
+        d = self.ctl.get(download_id)
+        if d is not None and d.kind is Kind.FILE and self.list.youtube_only:
+            self._nav_buttons["downloads"].setChecked(True)
+            self._navigate(self._nav_buttons["downloads"])
+        for chip in self._chips.buttons():
+            chip.setChecked(chip.property("key") == "all")
+        self.list.set_filter("all")
+        self.list.reveal(download_id)
 
     def _on_changed(self, download_id: int) -> None:
         self.list.update_download(download_id)
