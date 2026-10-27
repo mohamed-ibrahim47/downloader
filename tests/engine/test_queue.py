@@ -288,9 +288,11 @@ def test_redownload_deletes_damaged_file_and_requeues(env, tmp_path):
                  downloaded=5, segments=[Segment(0, 0, 4, 5)], verified=False, duplicate_of="b.zip")
     q._store.add(d)
     q._downloads[d.id] = d
-    (tmp_path / "a.zip").write_bytes(b"12345")
+    (tmp_path / "a.zip.part").write_bytes(b"12345")
+    (tmp_path / "a.zip").write_bytes(b"not ours")  # a file that took the name later stays
     q.redownload(d.id)
-    assert not (tmp_path / "a.zip").exists()
+    assert not (tmp_path / "a.zip.part").exists()
+    assert (tmp_path / "a.zip").read_bytes() == b"not ours"
     assert d.segments == [] and d.downloaded == 0 and d.error is None and d.duplicate_of is None
     assert d.status in (Status.QUEUED, Status.DOWNLOADING)
     assert jobs[d.id].started

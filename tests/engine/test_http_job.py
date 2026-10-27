@@ -305,8 +305,37 @@ def test_checksum_mismatch_fails_and_keeps_file(http_server, store, tmp_path):
     _job(d, store).run()
     assert d.status is Status.FAILED and d.error == CHECKSUM_MISMATCH
     assert d.verified is False and d.checking is False
-    assert (tmp_path / "app.zip").read_bytes() == SMALL
-    assert not (tmp_path / "app.zip.part").exists()
+    # Kept for the user, but never under its real name: a damaged setup.exe mustn't be one click away.
+    assert (tmp_path / "app.zip.part").read_bytes() == SMALL
+    assert not (tmp_path / "app.zip").exists()
+
+
+def test_unreadable_candidate_is_skipped(http_server, store, tmp_path, monkeypatch):
+    (tmp_path / "other.zip").write_bytes(SMALL)
+    real = checksum_mod.hash_file
+
+    def flaky(path, algos, should_stop=lambda: False):
+        if path.name == "other.zip":
+            raise PermissionError("locked")
+        return real(path, algos, should_stop)
+
+    monkeypatch.setattr(checksum_mod, "hash_file", flaky)
+    d = _download(http_server.add("/app.zip", SMALL), tmp_path)
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED and d.duplicate_of is None
+
+
+def test_unreadable_part_fails_plainly(http_server, store, tmp_path, monkeypatch):
+    def broken(path, algos, should_stop=lambda: False):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(checksum_mod, "hash_file", broken)
+    d = _download(http_server.add("/app.zip", SMALL), tmp_path)
+    d.checksum = _sha(SMALL)
+    finished = []
+    _job(d, store, finished).run()
+    assert d.status is Status.FAILED and d.error == "couldn't read the downloaded file to check it"
+    assert d.checking is False and finished == [d]
 
 
 def test_checking_reported_before_completion(http_server, store, tmp_path):
