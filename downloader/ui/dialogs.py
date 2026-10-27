@@ -127,7 +127,7 @@ class FormatDialog(QDialog):
 
 
 class PlaylistDialog(QDialog):
-    def __init__(self, info: PlaylistInfo, picked: set[int], parent=None):
+    def __init__(self, info: PlaylistInfo, picked: set[int], parent=None, have: set[int] = frozenset()):
         super().__init__(parent)
         self.setWindowTitle("Choose videos")
         self.resize(620, 560)
@@ -140,7 +140,8 @@ class PlaylistDialog(QDialog):
         self._list = QListWidget()
         width = 3 if len(info.entries) >= 100 else 2
         for e in info.entries:
-            item = QListWidgetItem(f"{e.index:0{width}d}   {e.title}   {fmt_duration(e.duration)}")
+            had = "   · already downloaded" if e.index in have else ""
+            item = QListWidgetItem(f"{e.index:0{width}d}   {e.title}   {fmt_duration(e.duration)}{had}")
             item.setData(Qt.UserRole, e.index)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked if e.index in picked else Qt.Unchecked)

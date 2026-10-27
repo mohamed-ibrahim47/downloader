@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         self.list.remove_clicked.connect(self.ctl.remove)
         self.list.delete_copy_clicked.connect(self._on_delete_copy)
         self.list.keep_both_clicked.connect(self.ctl.keep_both)
+        self.smart_bar.show_requested.connect(self.show_download)
 
         clipboard = QGuiApplication.clipboard()
         self._last_clip = clipboard.text().strip()  # don't grab whatever was copied before launch

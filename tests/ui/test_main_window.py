@@ -167,3 +167,9 @@ def test_show_download_switches_to_all(win, qtbot):
     card = win.list._cards[queued]
     assert card.isVisibleTo(win) and card.property("highlight") is True
     qtbot.waitUntil(lambda: card.property("highlight") is False, timeout=3000)
+
+
+def test_smart_bar_show_it_reveals_card(win, qtbot):
+    queued = next(d.id for d in win.ctl.downloads() if d.status is Status.QUEUED)
+    win.smart_bar.show_requested.emit(queued)
+    assert win.list._cards[queued].property("highlight") is True

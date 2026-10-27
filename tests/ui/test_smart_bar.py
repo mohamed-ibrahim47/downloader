@@ -183,3 +183,112 @@ def test_format_dialog_clip(qtbot):
     dialog.clip_fields.toggle.setChecked(True)
     dialog.clip_fields.to_edit.setText("2:30")
     assert dialog.clip() == (60, 150)
+
+
+# ---- you already have this ---------------------------------------------------------
+
+import datetime
+
+from downloader.engine.models import Download, Kind, Status
+
+BUNNY = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+
+
+def _have(bar, tmp_path, url, name, kind=Kind.FILE, status=Status.COMPLETED, on_disk=True, **kw):
+    d = Download(url=url, kind=kind, filename=name, folder=str(tmp_path), **kw)
+    bar.ctl.queue.add(d)
+    d.status = status
+    if status is Status.COMPLETED:
+        d.finished_at = datetime.datetime(datetime.date.today().year, 10, 26, 9).timestamp()
+    if on_disk:
+        (tmp_path / name).write_bytes(b"x")
+    return d
+
+
+def _file(bar, qtbot, monkeypatch, url="https://e.com/a.zip"):
+    monkeypatch.setattr(smart_bar, "probe", lambda u: FileInfo(u, "a.zip", 10, True))
+    bar.set_text(url)
+    qtbot.waitUntil(lambda: bar.state == "file", timeout=3000)
+    bar.show()
+
+
+def _notice(bar):
+    label = bar.findChild(QLabel, "notice")
+    return label.text() if label.isVisible() else None
+
+
+def test_notice_for_downloaded_file(bar, qtbot, monkeypatch, tmp_path):
+    d = _have(bar, tmp_path, "https://e.com/a.zip", "a.zip")
+    opened = []
+    monkeypatch.setattr(bar.ctl, "open_folder", opened.append)
+    _file(bar, qtbot, monkeypatch, "https://e.com/a.zip#top")
+    assert _notice(bar) == "You downloaded this on 26 Oct"
+    assert bar.action.isEnabled()
+    qtbot.mouseClick(_button(bar, "Open folder"), Qt.LeftButton)
+    assert opened == [d]
+
+
+def test_no_notice_for_new_link(bar, qtbot, monkeypatch, tmp_path):
+    _file(bar, qtbot, monkeypatch)
+    assert _notice(bar) is None
+
+
+def test_no_notice_when_file_deleted(bar, qtbot, monkeypatch, tmp_path):
+    _have(bar, tmp_path, "https://e.com/a.zip", "a.zip", on_disk=False)
+    _file(bar, qtbot, monkeypatch)
+    assert _notice(bar) is None
+
+
+def test_download_again_adds_second_copy(bar, qtbot, monkeypatch, tmp_path):
+    _have(bar, tmp_path, "https://e.com/a.zip", "a.zip")
+    _file(bar, qtbot, monkeypatch)
+    qtbot.mouseClick(_button(bar, "Download again"), Qt.LeftButton)
+    newest = bar.ctl.downloads()[0]
+    assert newest.filename == "a (2).zip" and bar.state == "empty"
+
+
+def test_notice_for_same_video_other_link(bar, qtbot, monkeypatch, tmp_path):
+    _have(bar, tmp_path, BUNNY, "Bunny.mp4", kind=Kind.VIDEO, video_id="aqz-KE-bpKQ")
+    _video(bar, qtbot, monkeypatch, url="https://youtu.be/aqz-KE-bpKQ?t=5")
+    assert _notice(bar) == "You downloaded this on 26 Oct"
+
+
+def test_notice_clip_vs_full(bar, qtbot, monkeypatch, tmp_path):
+    _have(bar, tmp_path, BUNNY, "Bunny (1-00 to 2-00).mp4", kind=Kind.VIDEO, video_id="aqz-KE-bpKQ",
+          clip_start=60, clip_end=120)
+    _video(bar, qtbot, monkeypatch)
+    assert _notice(bar) is None
+    bar.clip.toggle.setChecked(True)
+    bar.clip.from_edit.setText("1:00")
+    bar.clip.to_edit.setText("2:00")
+    assert _notice(bar) == "You downloaded this on 26 Oct"
+
+
+def test_show_it_emits(bar, qtbot, monkeypatch, tmp_path):
+    d = _have(bar, tmp_path, "https://e.com/a.zip", "a.zip", status=Status.QUEUED, on_disk=False)
+    _file(bar, qtbot, monkeypatch)
+    assert _notice(bar) == "Already in your list"
+    with qtbot.waitSignal(bar.show_requested) as sig:
+        qtbot.mouseClick(_button(bar, "Show it"), Qt.LeftButton)
+    assert sig.args == [d.id]
+
+
+def test_playlist_unticks_what_you_have(bar, qtbot, monkeypatch, tmp_path):
+    _have(bar, tmp_path, "https://www.youtube.com/watch?v=BBBBBBBBBBB", "B.mp4", kind=Kind.VIDEO,
+          video_id="BBBBBBBBBBB")
+    entries = [PlaylistEntry(i, f"https://www.youtube.com/watch?v={c * 11}", f"V{i}", 60)
+               for i, c in ((1, "A"), (2, "B"), (3, "C"))]
+    monkeypatch.setattr(smart_bar, "fetch_info", lambda u: PlaylistInfo(u, "PL", entries))
+    bar.set_text("https://www.youtube.com/playlist?list=PL1")
+    qtbot.waitUntil(lambda: bar.state == "playlist", timeout=3000)
+    assert "1 already downloaded" in _label(bar, "optMeta")
+    assert bar.action.text() == "Download 2 videos"
+
+
+def test_playlist_dialog_marks_downloaded(qtbot):
+    from downloader.ui.dialogs import PlaylistDialog
+    entries = [PlaylistEntry(1, "u1", "One", 60), PlaylistEntry(2, "u2", "Two", 60)]
+    dialog = PlaylistDialog(PlaylistInfo("u", "PL", entries), {1}, have={2})
+    qtbot.addWidget(dialog)
+    texts = [dialog._list.item(i).text() for i in range(2)]
+    assert "already downloaded" not in texts[0] and texts[1].endswith("already downloaded")

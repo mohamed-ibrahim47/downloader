@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QVBoxLayout, QWidget)
 
@@ -14,7 +14,7 @@ from ..engine.youtube import (PlaylistInfo, QUALITIES, VideoInfo, choose_format,
 from .clip_fields import ClipFields
 from .dialogs import FormatDialog, PlaylistDialog
 from .elided import ElidedLabel
-from .formatting import fmt_bytes, fmt_duration
+from .formatting import fmt_bytes, fmt_day, fmt_duration
 from .icons import pixmap
 from .workers import run_in_pool
 
@@ -30,6 +30,8 @@ def _plain(name: str) -> QLabel:
 
 
 class SmartBar(QWidget):
+    show_requested = Signal(int)  # "Show it": bring that download's card into view
+
     def __init__(self, controller, palette: dict[str, str], parent=None):
         super().__init__(parent)
         self.ctl = controller
@@ -41,6 +43,8 @@ class SmartBar(QWidget):
         self._video: VideoInfo | None = None
         self._playlist: PlaylistInfo | None = None
         self._picked: set[int] = set()
+        self._have: set[int] = set()
+        self._existing = None
         self._quality = "720p"
 
         frame = QFrame(objectName="smartBar")
@@ -117,6 +121,7 @@ class SmartBar(QWidget):
         box.setSpacing(10)
         box.addLayout(opt)
         box.addWidget(self.clip)
+        box.addWidget(self._build_notice())
 
         frame_layout = QVBoxLayout(frame)
         frame_layout.setContentsMargins(0, 0, 0, 0)
@@ -135,6 +140,27 @@ class SmartBar(QWidget):
         self.input.textEdited.connect(lambda _t: self._debounce.start())
         self.input.returnPressed.connect(self._check)
         self._render()
+
+    def _build_notice(self) -> QWidget:
+        """"You downloaded this on 26 Oct · Open folder · Download again", or "Already in your list · Show it"."""
+        self._notice_row = QWidget()
+        self._notice = _plain("notice")
+        self._open_existing = QPushButton("Open folder", objectName="linkButton")
+        self._again = QPushButton("Download again", objectName="linkButton")
+        self._show_it = QPushButton("Show it", objectName="linkButton")
+        self._open_existing.clicked.connect(lambda: self.ctl.open_folder(self._existing.download))
+        self._again.clicked.connect(self._download)
+        self._show_it.clicked.connect(lambda: self.show_requested.emit(self._existing.download.id))
+        row = QHBoxLayout(self._notice_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(12)
+        row.addWidget(self._notice)
+        for b in (self._open_existing, self._again, self._show_it):
+            b.setCursor(Qt.PointingHandCursor)
+            row.addWidget(b)
+        row.addStretch(1)
+        self._notice_row.setVisible(False)
+        return self._notice_row
 
     # ---- public -------------------------------------------------------------
 
@@ -182,7 +208,8 @@ class SmartBar(QWidget):
             self._set_state("video")
         elif isinstance(result, PlaylistInfo):
             self._playlist = result
-            self._picked = {e.index for e in result.entries}
+            self._have = self.ctl.already_have(result)
+            self._picked = {e.index for e in result.entries} - self._have
             self._set_state("playlist" if result.entries else "error")
 
     @Slot(str)
@@ -225,7 +252,7 @@ class SmartBar(QWidget):
             self._clear()
 
     def _open_playlist(self) -> None:
-        dialog = PlaylistDialog(self._playlist, self._picked, self.window())
+        dialog = PlaylistDialog(self._playlist, self._picked, self.window(), have=self._have)
         if dialog.exec() == QDialog.Accepted:
             self._picked = dialog.picked()
             self._render()
@@ -247,6 +274,7 @@ class SmartBar(QWidget):
         self.badge.setText({"checking": "Checking…", "error": "Can't use this link"}.get(state, ""))
         if not showing:
             self.clip.setVisible(False)
+            self._notice_row.setVisible(False)
             return
 
         self.quality_group.setVisible(state != "file")
@@ -284,15 +312,37 @@ class SmartBar(QWidget):
             self.badge.setText(f"YouTube playlist · {n}")
             icon_name, title = "playlist", pl.title
             total = sum(e.duration or 0 for e in pl.entries)
-            meta = " · ".join(x for x in (f"{n} videos", fmt_duration(total)) if x)
+            had = f"{len(self._have)} already downloaded" if self._have else ""
+            meta = " · ".join(x for x in (f"{n} videos", fmt_duration(total), had) if x)
             chosen = [e for e in pl.entries if e.index in self._picked]
             size = fmt_bytes(estimate_playlist_size(chosen, self._quality)) or "Size unknown"
             note = f"{k} of {n} videos"
             action = "Download all" if k == n else f"Download {k} videos"
             self.action.setEnabled(k > 0)
+        self._render_notice(state)
         self._thumb.setPixmap(pixmap(icon_name, p["accent"], 20))
         self._title.setText(title)
         self._meta.setText(meta)
         self._size.setText(size)
         self._size_note.setText(note)
         self.action.setText(action)
+
+    def _render_notice(self, state: str) -> None:
+        if state == "file":
+            self._existing = self.ctl.existing(self._file.url)
+        elif state == "video":
+            self._existing = self.ctl.existing(self._video.url, self.clip.clip())
+        else:
+            self._existing = None
+        found = self._existing
+        self._notice_row.setVisible(found is not None)
+        if found is None:
+            return
+        if found.finished:
+            when = found.download.finished_at
+            self._notice.setText(f"You downloaded this on {fmt_day(when)}" if when else "You downloaded this before")
+        else:
+            self._notice.setText("Already in your list")
+        self._open_existing.setVisible(found.finished)
+        self._again.setVisible(found.finished)
+        self._show_it.setVisible(not found.finished)
