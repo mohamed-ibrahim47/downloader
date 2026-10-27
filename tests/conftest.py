@@ -23,6 +23,7 @@ class _Entry:
     active: int = 0
     redirect_to: str | None = None  # answer 302 to this path
     gzip: bool = False  # compress the body (as some servers do even for 206)
+    trickle: float = 0.0  # >0: send the body one byte at a time, this many seconds apart
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -109,6 +110,15 @@ class _Handler(BaseHTTPRequestHandler):
                 self.wfile.write(part[: len(part) // 2])
             self.wfile.flush()
             self.close_connection = True
+            return
+        if entry.trickle:
+            for i in range(len(part)):
+                time.sleep(entry.trickle)
+                try:
+                    self.wfile.write(part[i:i + 1])
+                    self.wfile.flush()
+                except (ConnectionError, OSError):
+                    return
             return
         for i in range(0, len(part), CHUNK):
             if entry.delay_per_chunk:

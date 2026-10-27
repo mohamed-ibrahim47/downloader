@@ -107,3 +107,11 @@ def test_lookup_quiet_on_connection_error():
     t = time.monotonic()
     assert lookup_sums(f"http://127.0.0.1:{port}/rel/app.zip", "app.zip", timeout=1) is None
     assert time.monotonic() - t < 2.5  # an unreachable site isn't asked six times
+
+
+def test_lookup_deadline_holds_against_a_trickle(http_server):
+    # One byte every 0.2 s never trips a per-read timeout, but the whole file would take 30 s.
+    http_server.add("/rel/SHA256SUMS", f"{H256}  app.zip\n".encode() * 2, trickle=0.2)
+    t = time.monotonic()
+    assert lookup_sums(http_server.url("/rel/app.zip"), "app.zip", timeout=1) is None
+    assert time.monotonic() - t < 3

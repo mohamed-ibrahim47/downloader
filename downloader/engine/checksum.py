@@ -10,6 +10,7 @@ from typing import Callable, Iterable
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import requests
+import urllib3
 
 from .probe import USER_AGENT
 
@@ -107,15 +108,17 @@ def _fetch(url: str, timeout: float, limit: int) -> str | None:
             if r.status_code != 200:
                 return None
             data = bytearray()
-            for block in r.iter_content(65536):
+            # read1 returns whatever has arrived, so a server trickling a byte at a time
+            # (each just inside the read timeout) still meets the deadline.
+            while block := r.raw.read1(65536, decode_content=True):
                 data += block
                 if len(data) > limit or time.monotonic() > deadline:
                     return None
             return data.decode("utf-8", errors="replace")
     except requests.ConnectionError as e:  # includes ConnectTimeout; a slow read is a ReadTimeout
         raise _Unreachable from e
-    except requests.RequestException:
-        return None
+    except (requests.RequestException, urllib3.exceptions.HTTPError, OSError):
+        return None  # a slow or broken reply (raw reads raise urllib3's own errors)
 
 
 def lookup_sums(url: str, filename: str, timeout: float = 10.0,
