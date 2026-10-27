@@ -227,6 +227,7 @@ def test_delete_copy_removes_and_deletes(ctl, qtbot):
     d.status, d.duplicate_of = Status.COMPLETED, "b.zip"
     Path(d.folder).mkdir(parents=True, exist_ok=True)
     d.target_path.write_bytes(b"x")
+    (Path(d.folder) / "b.zip").write_bytes(b"x")  # still identical when deleting
     with qtbot.waitSignal(ctl.removed, timeout=3000):
         ctl.delete_copy(d.id)
     assert not d.target_path.exists() and ctl.get(d.id) is None
@@ -238,3 +239,35 @@ def test_redownload_runs_in_background(ctl, qtbot):
     d.status = Status.FAILED
     ctl.redownload(d.id)
     qtbot.waitUntil(lambda: d.status in (Status.QUEUED, Status.DOWNLOADING), timeout=3000)
+
+
+def _copy_pair(ctl, original: bytes):
+    d = ctl.add_file(FileInfo("https://e.com/setup.zip", "setup (2).zip", 5, True))
+    ctl.queue.pause(d.id)
+    d.status, d.duplicate_of = Status.COMPLETED, "setup.zip"
+    Path(d.folder).mkdir(parents=True, exist_ok=True)
+    d.target_path.write_bytes(b"12345")
+    if original is not None:
+        (Path(d.folder) / "setup.zip").write_bytes(original)
+    return d
+
+
+def test_delete_copy_keeps_file_when_original_is_gone(ctl, qtbot):
+    d = _copy_pair(ctl, None)
+    ctl.delete_copy(d.id)
+    qtbot.waitUntil(lambda: d.duplicate_of is None, timeout=3000)
+    assert d.target_path.exists() and d.duplicate_of is None and ctl.get(d.id) is not None
+
+
+def test_delete_copy_keeps_file_when_original_changed(ctl, qtbot):
+    d = _copy_pair(ctl, b"54321")  # same size, different bytes now
+    ctl.delete_copy(d.id)
+    qtbot.waitUntil(lambda: d.duplicate_of is None, timeout=3000)
+    assert d.target_path.exists() and d.duplicate_of is None
+
+
+def test_delete_copy_deletes_when_still_identical(ctl, qtbot):
+    d = _copy_pair(ctl, b"12345")
+    with qtbot.waitSignal(ctl.removed, timeout=3000):
+        ctl.delete_copy(d.id)
+    assert not d.target_path.exists() and (Path(d.folder) / "setup.zip").exists()

@@ -393,3 +393,24 @@ def test_same_size_different_content_is_not_duplicate(http_server, store, tmp_pa
     d = _download(http_server.add("/setup.zip", SMALL), tmp_path)
     _job(d, store).run()
     assert d.status is Status.COMPLETED and d.duplicate_of is None
+
+
+def test_pause_while_checking_without_ranges_does_not_refetch(http_server, store, tmp_path, monkeypatch):
+    # A server without range support: all bytes are already here, so Resume must only re-check.
+    d = _download(http_server.add("/app.zip", SMALL, ranges=False), tmp_path)
+    d.checksum = _sha(SMALL)
+    job = _job(d, store)
+    real = checksum_mod.hash_file
+
+    def paused(path, algos, should_stop=lambda: False):
+        job.signal_pause()
+        return real(path, algos, should_stop)
+
+    monkeypatch.setattr(checksum_mod, "hash_file", paused)
+    job.run()
+    assert d.status is Status.PAUSED
+    monkeypatch.setattr(checksum_mod, "hash_file", real)
+    gets = len(http_server.get_ranges("/app.zip"))
+    _job(d, store).run()
+    assert d.status is Status.COMPLETED and d.verified is True
+    assert len(http_server.get_ranges("/app.zip")) == gets

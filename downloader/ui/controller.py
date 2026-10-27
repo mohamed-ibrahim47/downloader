@@ -10,6 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 
+from ..engine import checksum
 from ..engine.checksum import Checksum
 from ..engine.history import Existing, already_have, find_existing
 from ..engine.http_job import HttpJob
@@ -205,8 +206,29 @@ class Controller(QObject):
         self.changed.emit(download_id)
 
     def delete_copy(self, download_id: int) -> None:
-        """Remove a download that turned out identical to a file already there, and its file."""
-        self._background(self.queue.remove, download_id, True)
+        """Remove a download that turned out identical to a file already there, and its file.
+        Checked again first: the other file may have been deleted or changed since."""
+        self._background(self._delete_copy, download_id)
+
+    def _delete_copy(self, download_id: int) -> None:
+        d = self.get(download_id)
+        if d is None or not d.duplicate_of:
+            return
+        if self._still_identical(d.target_path, Path(d.folder) / d.duplicate_of):
+            self.queue.remove(download_id, delete_file=True)
+            return
+        d.duplicate_of = None  # not the same any more: keep this copy and drop the note
+        self.store.update(d)
+        self.queue.on_change(d)
+
+    @staticmethod
+    def _still_identical(mine: Path, other: Path) -> bool:
+        try:
+            if mine == other or not other.is_file() or other.stat().st_size != mine.stat().st_size:
+                return False
+            return checksum.hash_file(mine, {"sha256"}) == checksum.hash_file(other, {"sha256"})
+        except OSError:
+            return False
 
     def start_queue(self) -> None:
         self.queue.resume_all()

@@ -110,7 +110,11 @@ class HttpJob:
             if not d.segments:
                 d.segments = plan_segments(d.size, d.connections, d.resumable)
             fresh = not any(s.done for s in d.segments)
-            if not d.resumable or fresh or not d.part_path.exists():
+            # Paused while checking the finished file: every byte is here, even from a server
+            # that can't resume, so only the check runs again.
+            complete = (d.size is not None and all(s.finished for s in d.segments)
+                        and d.part_path.exists() and d.part_path.stat().st_size == d.size)
+            if not complete and (not d.resumable or fresh or not d.part_path.exists()):
                 # Nothing saved yet (a stale .part of the same name is not ours), or no range
                 # support: start over from an empty file.
                 for s in d.segments:
