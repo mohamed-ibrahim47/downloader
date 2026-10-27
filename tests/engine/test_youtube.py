@@ -122,3 +122,74 @@ def test_fetch_info_real_playlist():
     assert isinstance(info, PlaylistInfo)
     assert len(info.entries) > 3
     assert info.entries[0].index == 1
+
+
+# ---- clips ---------------------------------------------------------------------
+
+def _clip_job(tmp_path, clip=(10, 20)):
+    from downloader.engine.models import Download, Kind
+    from downloader.engine.ratelimit import TokenBucket
+    from downloader.engine.youtube import YouTubeJob
+    start, end = clip if clip else (None, None)
+    d = Download(url="https://www.youtube.com/watch?v=x", kind=Kind.VIDEO, filename="T (0-10 to 0-20).mp4",
+                 folder=str(tmp_path), format_selector="best", clip_start=start, clip_end=end)
+    return YouTubeJob(d, TokenBucket(None), lambda _d: None, lambda _d: None, backoff=())
+
+
+def test_clip_size():
+    from downloader.engine.youtube import clip_size
+    assert clip_size(48_200_000, 596, 0, 298) == 24_100_000
+    assert clip_size(None, 596, 0, 10) is None
+    assert clip_size(48_200_000, None, 0, 10) is None
+
+
+def test_clip_options(tmp_path):
+    opts = _clip_job(tmp_path)._options()
+    assert opts["force_keyframes_at_cuts"] is True and opts["continuedl"] is False
+    assert list(opts["download_ranges"]({}, None)) == [{"start_time": 10, "end_time": 20}]
+
+
+def test_full_video_options_unchanged(tmp_path):
+    opts = _clip_job(tmp_path, clip=None)._options()
+    assert "download_ranges" not in opts and "force_keyframes_at_cuts" not in opts
+    assert opts["continuedl"] is True
+
+
+def test_clip_restarts_from_scratch(tmp_path, monkeypatch):
+    import yt_dlp
+    leftover = tmp_path / "T (0-10 to 0-20).f137.mp4.part"
+    leftover.write_bytes(b"old")
+    seen = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def download(self, urls):
+            seen.append(leftover.exists())
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    job = _clip_job(tmp_path)
+    job.download.downloaded = 500
+    job.run()
+    assert seen == [False]
+
+
+@pytest.mark.network
+@pytest.mark.skipif(os.environ.get("RUN_NETWORK") != "1", reason="set RUN_NETWORK=1")
+def test_real_clip_downloads(tmp_path):
+    from downloader.engine.models import Download, Kind, Status
+    from downloader.engine.ratelimit import TokenBucket
+    from downloader.engine.youtube import YouTubeJob, selector_for
+    d = Download(url="https://www.youtube.com/watch?v=aqz-KE-bpKQ", kind=Kind.VIDEO,
+                 filename="Bunny (0-10 to 0-20).mp4", folder=str(tmp_path), format_selector=selector_for("480p"),
+                 clip_start=10, clip_end=20)
+    YouTubeJob(d, TokenBucket(None), lambda _d: None, lambda _d: None).run()
+    assert d.status is Status.COMPLETED, d.error
+    assert d.target_path.exists() and d.target_path.stat().st_size < 3_000_000

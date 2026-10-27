@@ -169,6 +169,13 @@ def estimate_playlist_size(entries: list[PlaylistEntry], quality: str) -> int | 
     return round(sum(seconds) / 60 * MB_PER_MINUTE[quality] * 1_000_000)
 
 
+def clip_size(full: int | None, duration: int | None, start: int, end: int) -> int | None:
+    """A clip's share of the whole video's size (an estimate: bitrate isn't even)."""
+    if not full or not duration:
+        return None
+    return round(full * (end - start) / duration)
+
+
 def friendly_error(raw: str) -> str:
     text = re.sub(r"^\s*ERROR:\s*", "", str(raw)).strip()
     m = re.search(r"HTTP Error (\d{3})", text)
@@ -241,6 +248,12 @@ class YouTubeJob:
         }
         if self._limiter.rate:
             opts["ratelimit"] = self._limiter.rate
+        if d.clip:
+            from yt_dlp.utils import download_range_func
+
+            # Exact cuts: ffmpeg re-encodes around the cut points. Such a file can't resume.
+            opts.update(download_ranges=download_range_func(None, [d.clip]), force_keyframes_at_cuts=True,
+                        continuedl=False)
         if d.subtitles:
             opts.update(writesubtitles=True, subtitleslangs=["en", "ar"])
         if d.audio_format == "mp3":
@@ -270,6 +283,8 @@ class YouTubeJob:
         d = self.download
         d.status, d.error = Status.DOWNLOADING, None
         self._base = 0
+        if d.clip:
+            self._start_over()
         error = None
         for attempt in range(len(self._backoff) + 1):
             try:
@@ -296,6 +311,18 @@ class YouTubeJob:
             self._finish_names()
             d.status, d.finished_at = Status.COMPLETED, time.time()
         self._on_finish(d)
+
+    def _start_over(self) -> None:
+        """A clip can't pick up where it stopped: clear what a previous attempt left."""
+        from .queue import leftover_files
+
+        d = self.download
+        for path in leftover_files(d):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        d.downloaded = 0
 
     def _on_final_path(self, path: str) -> None:
         self._final_path = path
