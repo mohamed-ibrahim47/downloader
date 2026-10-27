@@ -103,14 +103,15 @@ def _fetch(url: str, timeout: float, limit: int) -> str | None:
     """The text at `url`, or None: no redirects (they may lead off the site), small, and quick."""
     deadline = time.monotonic() + timeout
     try:
+        # Plain text only: unpacking a compressed reply is where it could outgrow the limit.
         with requests.get(url, allow_redirects=False, stream=True, timeout=timeout,
-                          headers={"User-Agent": USER_AGENT}) as r:
-            if r.status_code != 200:
+                          headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"}) as r:
+            if r.status_code != 200 or r.headers.get("Content-Encoding", "identity").lower() != "identity":
                 return None
             data = bytearray()
             # read1 returns whatever has arrived, so a server trickling a byte at a time
             # (each just inside the read timeout) still meets the deadline.
-            while block := r.raw.read1(65536, decode_content=True):
+            while block := r.raw.read1(65536, decode_content=False):
                 data += block
                 if len(data) > limit or time.monotonic() > deadline:
                     return None

@@ -22,7 +22,7 @@ class _Entry:
     max_conns: int = 0  # >0: answer 429 when more GETs than this are in flight
     active: int = 0
     redirect_to: str | None = None  # answer 302 to this path
-    gzip: bool = False  # compress the body (as some servers do even for 206)
+    gzip: bool | str = False  # compress the body (as some servers do even for 206); "always": even unasked
     trickle: float = 0.0  # >0: send the body one byte at a time, this many seconds apart
 
 
@@ -79,7 +79,7 @@ class _Handler(BaseHTTPRequestHandler):
             end = int(m.group(2)) if m.group(2) else len(data) - 1
             status = 206
         part = data[start:end + 1]
-        accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "")
+        accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "") or entry.gzip == "always"
         if entry.gzip and accepts_gzip:
             import gzip as _gzip
             part = _gzip.compress(part)

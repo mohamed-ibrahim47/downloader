@@ -115,3 +115,14 @@ def test_lookup_deadline_holds_against_a_trickle(http_server):
     t = time.monotonic()
     assert lookup_sums(http_server.url("/rel/app.zip"), "app.zip", timeout=1) is None
     assert time.monotonic() - t < 3
+
+
+def test_lookup_asks_for_plain_text(http_server):
+    http_server.add("/rel/SHA256SUMS", (H256 + "  app.zip" + chr(10)).encode(), gzip=True)
+    assert lookup_sums(http_server.url("/rel/app.zip"), "app.zip") == (Checksum("sha256", H256), "SHA256SUMS")
+
+
+def test_lookup_refuses_compressed_reply(http_server):
+    # Unpacking is where a "zip bomb" grows past the size limit: compressed replies aren't read at all.
+    http_server.add("/rel/SHA256SUMS", (H256 + "  app.zip" + chr(10)).encode(), gzip="always")
+    assert lookup_sums(http_server.url("/rel/app.zip"), "app.zip") is None
