@@ -81,3 +81,54 @@ def test_problem_shown_as_plain_text(qtbot):
     _set(w, "3:00", "2:30")
     label = w.findChild(QLabel, "clipProblem")
     assert label.text() == "From must be before To" and label.textFormat() == Qt.PlainText
+
+
+# ---- the range bar -------------------------------------------------------------
+
+def test_bar_follows_the_fields(qtbot):
+    w = _fields(qtbot)
+    _set(w, "1:00", "2:30")
+    assert w.bar.values() == (60, 150) and w.bar.maximum() == 596
+
+
+def test_fields_follow_the_bar(qtbot):
+    w = _fields(qtbot)
+    w.toggle.setChecked(True)
+    with qtbot.waitSignal(w.changed):
+        w.bar.range_changed.emit(90, 300)
+    assert (w.from_edit.text(), w.to_edit.text()) == ("1:30", "5:00")
+    assert w.clip() == (90, 300)
+
+
+def test_bar_starts_from_link_start(qtbot):
+    w = _fields(qtbot, url=URL + "&t=60")
+    assert w.bar.values() == (60, 596)
+
+
+def test_length_label(qtbot):
+    from PySide6.QtWidgets import QLabel
+    w = _fields(qtbot)
+    _set(w, "1:00", "2:30")
+    assert w.findChild(QLabel, "clipLength").text() == "1 min 30 s clip"
+    w.from_edit.setText("3:00")
+    assert w.findChild(QLabel, "clipLength").text() == ""
+
+
+def test_no_bar_when_length_unknown(qtbot):
+    w = _fields(qtbot, duration=None)
+    w.toggle.setChecked(True)
+    w.show()
+    assert not w.bar.isVisible()
+
+
+def test_bad_text_leaves_bar_alone(qtbot):
+    w = _fields(qtbot)
+    _set(w, "1:00", "2:30")
+    w.from_edit.setText("abc")
+    assert w.bar.values() == (60, 150)
+
+
+def test_bar_shows_video_start_and_end(qtbot):
+    from PySide6.QtWidgets import QLabel
+    w = _fields(qtbot)
+    assert (w.findChild(QLabel, "clipBarStart").text(), w.findChild(QLabel, "clipBarEnd").text()) == ("0:00", "9:56")

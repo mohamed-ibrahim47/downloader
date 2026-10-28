@@ -1,11 +1,13 @@
-"""From / To fields for downloading just part of a video, with a Clip switch that shows them."""
+"""Picking part of a video: a bar with two handles over the whole video, and From / To fields that
+follow it (or move it when typed in). A Clip switch shows them."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from ..engine.timecode import fmt_clock, parse_time, start_from_url
 from .formatting import fmt_duration
+from .range_slider import RangeSlider
 
 BAD_TIME = "use a time like 12:30 or 1:02:03"
 
@@ -32,15 +34,32 @@ class ClipFields(QWidget):
         self.to_edit.setPlaceholderText("end")
         self._problem = QLabel(objectName="clipProblem")
         self._problem.setTextFormat(Qt.PlainText)
+        self._length = QLabel(objectName="clipLength")
+        self.bar = RangeSlider()
+        self.bar.range_changed.connect(self._dragged)
 
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
         row.setSpacing(8)
         row.addWidget(QLabel("From"))
         row.addWidget(self.from_edit)
         row.addWidget(QLabel("To"))
         row.addWidget(self.to_edit)
+        row.addWidget(self._length)
         row.addWidget(self._problem, 1)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(6)
+        self._bar_start = QLabel("0:00", objectName="clipBarStart")
+        self._bar_end = QLabel(objectName="clipBarEnd")
+        self._bar_row = QWidget()
+        bar_row = QHBoxLayout(self._bar_row)
+        bar_row.setContentsMargins(0, 0, 0, 0)
+        bar_row.setSpacing(8)
+        bar_row.addWidget(self._bar_start)
+        bar_row.addWidget(self.bar, 1)
+        bar_row.addWidget(self._bar_end)
+        col.addWidget(self._bar_row)
+        col.addLayout(row)
         self.toggle.toggled.connect(self._toggled)
         self.setVisible(False)
 
@@ -52,6 +71,12 @@ class ClipFields(QWidget):
         self.toggle.setChecked(False)
         self.from_edit.setText(fmt_clock(start) if start is not None else "")
         self.to_edit.setText(fmt_clock(duration) if duration else "")
+        # The bar needs the video's length; without one (a live stream) only the fields are offered.
+        self._bar_row.setVisible(bool(duration))
+        if duration:
+            self._bar_end.setText(fmt_clock(duration))
+            self.bar.set_maximum(duration)
+            self.bar.set_values(min(start or 0, duration - 1), duration)
         self.blockSignals(False)
         self._refresh()
 
@@ -87,9 +112,18 @@ class ClipFields(QWidget):
         self.changed.emit()
 
     def _edited(self, _text: str) -> None:
+        clip = self.clip()
+        if clip and self._duration:
+            self.bar.set_values(*clip)
         self._refresh()
         self.changed.emit()
+
+    def _dragged(self, start: int, end: int) -> None:
+        self.from_edit.setText(fmt_clock(start))
+        self.to_edit.setText(fmt_clock(end))
 
     def _refresh(self) -> None:
         self.setVisible(self.on())
         self._problem.setText(self.problem() or "")
+        clip = self.clip()
+        self._length.setText(f"{fmt_duration(clip[1] - clip[0])} clip" if clip and clip[1] > clip[0] else "")

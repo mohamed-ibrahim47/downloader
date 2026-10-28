@@ -97,7 +97,8 @@ QPushButton#linkButton {{ border: none; background: transparent; color: {c['acce
 QPushButton#clipToggle {{ border: 1px solid {c['border']}; border-radius: 9px; background: transparent; color: {c['accent']}; font-size: 12px; padding: 1px 9px; }}
 QPushButton#clipToggle:checked {{ background: {c['accent']}; border-color: {c['accent']}; color: {c['bg']}; }}
 QLabel#clipProblem, QLabel#checksumNote[bad="true"] {{ color: {c['error']}; font-size: 12px; }}
-QLabel#checksumNote, QLabel#notice {{ color: {c['muted']}; font-size: 12px; }}
+QLabel#checksumNote, QLabel#notice, QLabel#clipLength, QLabel#clipBarStart, QLabel#clipBarEnd {{ color: {c['muted']}; font-size: 12px; }}
+RangeSlider {{ qproperty-accent: {c['accent']}; qproperty-track: {c['border']}; qproperty-handle: {c['surface']}; }}
 QPushButton#secondaryButton {{ min-height: 34px; padding: 0 14px; border: 1px solid {c['border']};
     border-radius: 10px; background: {c['surface']}; }}
 
