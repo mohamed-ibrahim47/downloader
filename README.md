@@ -57,16 +57,6 @@ connections are handled by backing off to one at a time.
 A name that's taken gets ` (2)`. Network drops are retried by themselves. Errors are written for
 people: *"server refused (403) · link may have expired"*, with a **Retry** button.
 
-### Knows what you already have
-Paste a link you downloaded last week and it says so, with **Open folder** right there, even
-when it's the same YouTube video under a different link. A file that turns out identical to one
-already in the folder is pointed out, with **Delete this copy** or **Keep both**.
-
-### Checks the file arrived intact
-Paste a checksum (SHA-256, SHA-1 or MD5), or let the app find the `SHA256SUMS` a site publishes
-next to the file. Once downloaded, the card says **✓ SHA-256 verified**, or warns that the file
-may be damaged and keeps it aside.
-
   </td>
   <td width="50%" valign="top">
     <img src="screenshots/formats.png" alt="The full list of formats for a video, with sizes">
@@ -87,11 +77,37 @@ M4A, and MP3.
 ### Subtitles, too
 Turn them on in Settings and they're saved next to each video.
 
-### Just the part you want
-Switch on **Clip** and download only minutes 12:30–15:00 of a long video. A link shared with a
-start time (`&t=750`) fills in **From** by itself. Cuts are exact, and the file is named
-`Title (12-30 to 15-00).mp4`.
+  </td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top">
 
+### Just the part you want
+Switch on **Clip** and drag the two handles on the bar to keep only the part you want, say
+1:00 to 2:30 of a long video, or type the times. The size updates as you drag. Cuts are exact,
+and the file is named `Title (1-00 to 2-30).mp4`.
+
+<img src="screenshots/clip.png" alt="A YouTube video with Clip on: a bar with two handles selects 1:00 to 2:30, and the size shows the clip's estimate">
+
+  </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+
+### Knows what you already have
+Paste a link you downloaded before and it says so, with **Open folder** right there, even when
+it's the same YouTube video under a different link, or a clip of it. A file that's already in
+the folder is spotted too, and one that turns out identical to another is pointed out, with
+**Delete this copy** or **Keep both**.
+
+### Checks the file arrived intact
+Paste a checksum (SHA-256, SHA-1 or MD5) in the optional box, or let the app find the
+`SHA256SUMS` a site publishes next to the file. Once downloaded, the card says **✓ SHA-256
+verified**, or warns that the file may be damaged and keeps it aside, never under its real name.
+
+  </td>
+  <td width="50%" valign="top">
+    <img src="screenshots/checks.png" alt="Cards being checked, verified, failing their checksum, and identical to a file already in the folder; the paste bar found the site's SHA256SUMS">
   </td>
   </tr>
   <tr>
