@@ -63,11 +63,19 @@ def test_video_never_matches_a_file_row(tmp_path):
     assert find_existing([d], VID) is None
 
 
-def test_clip_matches_only_same_range(tmp_path):
+def test_any_download_of_the_video_counts(tmp_path):
+    # A clip of the video is still "you have this" (the notice says it's a clip).
     d = make(tmp_path, name="T.mp4", url=VID, kind=Kind.VIDEO, video_id="aqz-KE-bpKQ", clip_start=750, clip_end=900)
-    assert find_existing([d], VID) is None
-    assert find_existing([d], VID, clip=(750, 900)) == Existing(d, True)
-    assert find_existing([d], VID, clip=(750, 901)) is None
+    assert find_existing([d], VID) == Existing(d, True)
+    assert find_existing([d], VID, clip=(750, 901)) == Existing(d, True)
+
+
+def test_closest_match_preferred(tmp_path):
+    full = make(tmp_path, name="T.mp4", url=VID, kind=Kind.VIDEO, video_id="aqz-KE-bpKQ")
+    clip = make(tmp_path, name="T (1-00 to 2-00).mp4", url=VID, kind=Kind.VIDEO, video_id="aqz-KE-bpKQ",
+                clip_start=60, clip_end=120)
+    assert find_existing([clip, full], VID).download is full
+    assert find_existing([full, clip], VID, clip=(60, 120)).download is clip
 
 
 def test_already_have_playlist(tmp_path):

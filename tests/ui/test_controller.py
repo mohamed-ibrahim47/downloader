@@ -271,3 +271,9 @@ def test_delete_copy_deletes_when_still_identical(ctl, qtbot):
     with qtbot.waitSignal(ctl.removed, timeout=3000):
         ctl.delete_copy(d.id)
     assert not d.target_path.exists() and (Path(d.folder) / "setup.zip").exists()
+
+
+def test_whole_video_clip_is_saved_as_the_video(ctl):
+    d = ctl.add_video(VideoInfo(BUNNY, "Title", "", 596, []),
+                      FormatChoice("best", 720, 48_200_000, None, "mp4"), clip=(0, 596))
+    assert (d.filename, d.clip, d.size) == ("Title.mp4", None, 48_200_000)

@@ -1,6 +1,7 @@
 """One paste bar for every kind of link: it works out what was pasted and shows the right options."""
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import Qt, QTimer, Signal, Slot
@@ -9,6 +10,9 @@ from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabe
 
 from ..engine.checksum import lookup_sums, parse_checksum
 from ..engine.linkkind import LinkKind, classify
+from ..engine.paths import safe_filename
+from ..engine.queue import MEDIA_EXTS
+from ..engine.timecode import clip_suffix, fmt_clock
 from ..engine.probe import FileInfo, probe
 from ..engine.youtube import (PlaylistInfo, QUALITIES, VideoInfo, choose_format, clip_size,
                               estimate_playlist_size, fetch_info)
@@ -48,6 +52,7 @@ class SmartBar(QWidget):
         self._have: set[int] = set()
         self._existing = None
         self._found = None  # (Checksum, sums file name) published next to the file
+        self._on_disk: Path | None = None  # same name already in the folder, not in the list
         self._quality = "720p"
 
         frame = QFrame(objectName="smartBar")
@@ -84,10 +89,6 @@ class SmartBar(QWidget):
         meta_row.addWidget(self._more)
         meta_row.addWidget(self.clip.toggle)
         meta_row.addWidget(self._choose)
-        self._checksum_link = QPushButton("check with checksum…", objectName="linkButton")
-        self._checksum_link.setCursor(Qt.PointingHandCursor)
-        self._checksum_link.clicked.connect(self._open_checksum)
-        meta_row.addWidget(self._checksum_link)
         text_col = QVBoxLayout()
         text_col.setSpacing(3)
         text_col.addWidget(self._title)
@@ -152,7 +153,8 @@ class SmartBar(QWidget):
     def _build_checksum_row(self) -> QWidget:
         self._sum_row = QWidget()
         self._sum_input = QLineEdit(objectName="checksumInput")
-        self._sum_input.setPlaceholderText("Paste the SHA-256, SHA-1 or MD5 the site gives")
+        self._sum_input.setPlaceholderText("Optional: paste the SHA-256, SHA-1 or MD5 the site gives, "
+                                           "to check the file arrived intact")
         self._sum_input.setAccessibleName("Checksum")
         self._sum_input.setProperty("role", "field")
         self._sum_input.textChanged.connect(lambda _t: self._render())
@@ -163,14 +165,8 @@ class SmartBar(QWidget):
         row.addWidget(self._sum_input, 1)
         row.addWidget(self._sum_note)
         row.addStretch(0)
-        self._sum_input.setVisible(False)
         self._sum_row.setVisible(False)
         return self._sum_row
-
-    def _open_checksum(self) -> None:
-        self._sum_input.setVisible(True)
-        self._sum_input.setFocus()
-        self._render()
 
     def _build_notice(self) -> QWidget:
         """"You downloaded this on 26 Oct · Open folder · Download again", or "Already in your list · Show it"."""
@@ -179,7 +175,7 @@ class SmartBar(QWidget):
         self._open_existing = QPushButton("Open folder", objectName="linkButton")
         self._again = QPushButton("Download again", objectName="linkButton")
         self._show_it = QPushButton("Show it", objectName="linkButton")
-        self._open_existing.clicked.connect(lambda: self.ctl.open_folder(self._existing.download))
+        self._open_existing.clicked.connect(self._open_existing_folder)
         self._again.clicked.connect(self._download)
         self._show_it.clicked.connect(lambda: self.show_requested.emit(self._existing.download.id))
         row = QHBoxLayout(self._notice_row)
@@ -213,7 +209,6 @@ class SmartBar(QWidget):
         self._sum_input.blockSignals(True)
         self._sum_input.clear()
         self._sum_input.blockSignals(False)
-        self._sum_input.setVisible(False)
         kind = classify(text)
         if not text:
             self._set_state("empty")
@@ -345,7 +340,6 @@ class SmartBar(QWidget):
         self.quality_group.setVisible(state != "file")
         self._more.setVisible(state == "video")
         self.clip.toggle.setVisible(state == "video")
-        self._checksum_link.setVisible(state == "file" and self._sum_input.isHidden())
         self.clip.setVisible(state == "video" and self.clip.on())
         self._choose.setVisible(state == "playlist")
         self.action.setEnabled(True)
@@ -397,25 +391,55 @@ class SmartBar(QWidget):
         self.action.setText(action)
 
     def _render_notice(self, state: str) -> None:
+        clip = self.clip.clip() if state == "video" else None
         if state == "file":
             self._existing = self.ctl.existing(self._file.url)
         elif state == "video":
-            self._existing = self.ctl.existing(self._video.url, self.clip.clip())
+            self._existing = self.ctl.existing(self._video.url, clip)
         else:
             self._existing = None
         found = self._existing
-        self._notice_row.setVisible(found is not None)
-        if found is None:
+        # Not in the list (or removed from it), but a file of that name is in the folder.
+        self._on_disk = self._name_on_disk(state, clip) if found is None else None
+        self._notice_row.setVisible(found is not None or self._on_disk is not None)
+        if found is None and self._on_disk is None:
             return
-        if found.finished:
-            when = found.download.finished_at
-            self._notice.setText(f"You downloaded this on {fmt_day(when)}" if when else "You downloaded this before")
+        if found is None:
+            self._notice.setText(f"{self._on_disk.name} is already in the folder")
+        elif found.finished:
+            self._notice.setText(self._have_text(found.download, clip))
         else:
             self._notice.setText("Already in your list")
-        self._open_existing.setVisible(found.finished)
-        self._again.setVisible(found.finished)
+        finished = found is None or found.finished
+        self._open_existing.setVisible(finished)
+        self._again.setVisible(finished)
         self._again.setEnabled(not self._blocked())
-        self._show_it.setVisible(not found.finished)
+        self._show_it.setVisible(not finished)
+
+    @staticmethod
+    def _have_text(d, clip) -> str:
+        when = f" on {fmt_day(d.finished_at)}" if d.finished_at else " before"
+        if d.clip == clip:
+            return f"You downloaded this{when}"
+        if d.clip:
+            return f"You downloaded a clip of this ({fmt_clock(d.clip[0])}–{fmt_clock(d.clip[1])}){when}"
+        return f"You downloaded the whole video{when}"
+
+    def _name_on_disk(self, state: str, clip) -> Path | None:
+        s = self.ctl.settings
+        if state == "file":
+            path = Path(s.folder_general) / self._file.filename
+            return path if path.is_file() else None
+        if state == "video":
+            stem = safe_filename(self._video.title) + (clip_suffix(*clip) if clip else "")
+            return next((p for p in (Path(s.folder_video) / f"{stem}{e}" for e in MEDIA_EXTS) if p.is_file()), None)
+        return None
+
+    def _open_existing_folder(self) -> None:
+        if self._existing is not None:
+            self.ctl.open_folder(self._existing.download)
+        elif self._on_disk is not None:
+            self.ctl.reveal(self._on_disk)
 
     def _render_checksum(self) -> None:
         text = self._sum_input.text().strip()
@@ -434,4 +458,4 @@ class SmartBar(QWidget):
             self._sum_note.style().unpolish(self._sum_note)
             self._sum_note.style().polish(self._sum_note)
         self._sum_note.setVisible(bool(note))
-        self._sum_row.setVisible(bool(note) or not self._sum_input.isHidden())
+        self._sum_row.setVisible(True)

@@ -132,3 +132,11 @@ def test_bar_shows_video_start_and_end(qtbot):
     from PySide6.QtWidgets import QLabel
     w = _fields(qtbot)
     assert (w.findChild(QLabel, "clipBarStart").text(), w.findChild(QLabel, "clipBarEnd").text()) == ("0:00", "9:56")
+
+
+def test_whole_video_range_is_no_clip(qtbot):
+    from PySide6.QtWidgets import QLabel
+    w = _fields(qtbot)
+    _set(w, "0:00", "9:56")
+    assert w.on() and w.problem() is None and w.clip() is None
+    assert w.findChild(QLabel, "clipLength").text() == "whole video"

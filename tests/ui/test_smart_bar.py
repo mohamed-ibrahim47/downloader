@@ -257,11 +257,46 @@ def test_notice_clip_vs_full(bar, qtbot, monkeypatch, tmp_path):
     _have(bar, tmp_path, BUNNY, "Bunny (1-00 to 2-00).mp4", kind=Kind.VIDEO, video_id="aqz-KE-bpKQ",
           clip_start=60, clip_end=120)
     _video(bar, qtbot, monkeypatch)
-    assert _notice(bar) is None
+    assert _notice(bar) == "You downloaded a clip of this (1:00–2:00) on 26 Oct"
     bar.clip.toggle.setChecked(True)
     bar.clip.from_edit.setText("1:00")
     bar.clip.to_edit.setText("2:00")
     assert _notice(bar) == "You downloaded this on 26 Oct"
+
+
+def test_notice_whole_video_when_picking_a_clip(bar, qtbot, monkeypatch, tmp_path):
+    _have(bar, tmp_path, BUNNY, "Bunny.mp4", kind=Kind.VIDEO, video_id="aqz-KE-bpKQ")
+    _video(bar, qtbot, monkeypatch)
+    bar.clip.toggle.setChecked(True)
+    bar.clip.to_edit.setText("2:00")
+    assert _notice(bar) == "You downloaded the whole video on 26 Oct"
+
+
+def test_notice_for_file_already_in_folder_without_history(bar, qtbot, monkeypatch, tmp_path):
+    (tmp_path / "a.zip").write_bytes(b"x")  # removed from the list, but still on disk
+    opened = []
+    monkeypatch.setattr(bar.ctl, "reveal", opened.append)
+    _file(bar, qtbot, monkeypatch)
+    assert _notice(bar) == "a.zip is already in the folder"
+    qtbot.mouseClick(_button(bar, "Open folder"), Qt.LeftButton)
+    assert opened == [tmp_path / "a.zip"]
+    assert _button(bar, "Download again").isVisible()
+
+
+def test_notice_for_video_already_in_folder_without_history(bar, qtbot, monkeypatch, tmp_path):
+    bar.ctl.settings.folder_video = str(tmp_path)
+    (tmp_path / "Big Buck Bunny.mp4").write_bytes(b"x")
+    _video(bar, qtbot, monkeypatch)
+    assert _notice(bar) == "Big Buck Bunny.mp4 is already in the folder"
+
+
+def test_whole_range_clip_is_the_full_video(bar, qtbot, monkeypatch):
+    _video(bar, qtbot, monkeypatch)
+    bar.clip.toggle.setChecked(True)  # the bar starts covering the whole video
+    assert _label(bar, "sizeLabel") == "48.2 MB"
+    qtbot.mouseClick(bar.action, Qt.LeftButton)
+    d = bar.ctl.downloads()[0]
+    assert d.clip is None and d.filename == "Big Buck Bunny.mp4"
 
 
 def test_show_it_emits(bar, qtbot, monkeypatch, tmp_path):
@@ -314,16 +349,15 @@ def _sum_note(bar):
     return label.text() if label.isVisible() else ""
 
 
-def test_checksum_link_reveals_field(bar, qtbot, monkeypatch):
+def test_checksum_field_shown_for_files(bar, qtbot, monkeypatch):
     _file(bar, qtbot, monkeypatch)
-    assert not _sum_field(bar).isVisible()
-    qtbot.mouseClick(_button(bar, "check with checksum…"), Qt.LeftButton)
     assert _sum_field(bar).isVisible()
+    assert "optional" in _sum_field(bar).placeholderText().lower()
 
 
-def test_checksum_link_only_for_files(bar, qtbot, monkeypatch):
+def test_checksum_field_only_for_files(bar, qtbot, monkeypatch):
     _video(bar, qtbot, monkeypatch)
-    assert not _button(bar, "check with checksum…").isVisible()
+    assert not _sum_field(bar).isVisible()
 
 
 def test_checksum_found_automatically(bar, qtbot, monkeypatch):
@@ -342,7 +376,6 @@ def test_pasted_checksum_wins(bar, qtbot, monkeypatch):
     monkeypatch.setattr(smart_bar, "lookup_sums", lambda url, name: (Checksum("sha256", "c" * 64), "SHA256SUMS"))
     _file(bar, qtbot, monkeypatch)
     qtbot.waitUntil(lambda: "found" in _sum_note(bar), timeout=3000)
-    qtbot.mouseClick(_button(bar, "check with checksum…"), Qt.LeftButton)
     _sum_field(bar).setText(f"{H.upper()}  a.zip")
     assert _sum_note(bar) == "SHA-256 · checked after download"
     qtbot.mouseClick(bar.action, Qt.LeftButton)
@@ -352,7 +385,6 @@ def test_pasted_checksum_wins(bar, qtbot, monkeypatch):
 
 def test_invalid_checksum_disables_download(bar, qtbot, monkeypatch):
     _file(bar, qtbot, monkeypatch)
-    qtbot.mouseClick(_button(bar, "check with checksum…"), Qt.LeftButton)
     _sum_field(bar).setText("not a hash")
     assert _sum_note(bar) == "paste a checksum: 32, 40, 64 or 128 hex characters"
     assert not bar.action.isEnabled()
@@ -386,16 +418,14 @@ def test_lookup_failure_is_silent(bar, qtbot, monkeypatch):
 
 def test_new_link_clears_pasted_checksum(bar, qtbot, monkeypatch):
     _file(bar, qtbot, monkeypatch)
-    qtbot.mouseClick(_button(bar, "check with checksum…"), Qt.LeftButton)
     _sum_field(bar).setText(H)
     _file(bar, qtbot, monkeypatch, url="https://e.com/b.zip")
-    assert _sum_field(bar).text() == "" and not _sum_field(bar).isVisible()
+    assert _sum_field(bar).text() == ""
 
 
 def test_download_again_respects_invalid_checksum(bar, qtbot, monkeypatch, tmp_path):
     _have(bar, tmp_path, "https://e.com/a.zip", "a.zip")
     _file(bar, qtbot, monkeypatch)
-    qtbot.mouseClick(_button(bar, "check with checksum…"), Qt.LeftButton)
     _sum_field(bar).setText("not a hash")
     before = len(bar.ctl.downloads())
     assert not _button(bar, "Download again").isEnabled()

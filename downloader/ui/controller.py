@@ -117,6 +117,8 @@ class Controller(QObject):
         else:
             quality = f"{choice.height}p" if choice.height else "Audio"
             ext, note, audio_format = choice.ext, choice.note, choice.audio_format
+        if clip and clip == (0, info.duration):
+            clip = None  # the whole video: a normal download (resumable, no re-encoding)
         suffix = clip_suffix(*clip) if clip else ""
         name = self.queue.unique_name(folder, f"{safe_filename(info.title)}{suffix}.{ext}", by_stem=True)
         size = clip_size(choice.size, info.duration, *clip) if clip else choice.size
@@ -183,12 +185,17 @@ class Controller(QObject):
         else:
             self.open_folder(d)
 
+    @classmethod
+    def open_folder(cls, d: Download) -> None:
+        cls.reveal(d.target_path)
+
     @staticmethod
-    def open_folder(d: Download) -> None:
-        if sys.platform == "win32" and d.target_path.exists():
-            subprocess.Popen(["explorer", "/select,", str(d.target_path)])
+    def reveal(path: Path) -> None:
+        """Open the folder in Explorer with the file selected (just the folder if it's gone)."""
+        if sys.platform == "win32" and path.exists():
+            subprocess.Popen(["explorer", "/select,", str(path)])
         else:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(d.folder))
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
 
     def remove(self, download_id: int, delete_file: bool = False) -> None:
         self._background(self.queue.remove, download_id, delete_file)

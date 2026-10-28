@@ -100,6 +100,16 @@ class ClipFields(QWidget):
         return None
 
     def clip(self) -> tuple[int, int] | None:
+        """The part to download; None when off, not valid, or the whole video anyway."""
+        picked = self._picked()
+        if picked is None or (picked[0] == 0 and picked[1] == self._duration):
+            return None
+        return picked
+
+    def whole_video(self) -> bool:
+        return self._picked() is not None and self.clip() is None
+
+    def _picked(self) -> tuple[int, int] | None:
         if not self.on() or self.problem():
             return None
         end_text = self.to_edit.text().strip()
@@ -112,9 +122,9 @@ class ClipFields(QWidget):
         self.changed.emit()
 
     def _edited(self, _text: str) -> None:
-        clip = self.clip()
-        if clip and self._duration:
-            self.bar.set_values(*clip)
+        picked = self._picked()
+        if picked and self._duration:
+            self.bar.set_values(*picked)
         self._refresh()
         self.changed.emit()
 
@@ -126,4 +136,7 @@ class ClipFields(QWidget):
         self.setVisible(self.on())
         self._problem.setText(self.problem() or "")
         clip = self.clip()
-        self._length.setText(f"{fmt_duration(clip[1] - clip[0])} clip" if clip and clip[1] > clip[0] else "")
+        if clip:
+            self._length.setText(f"{fmt_duration(clip[1] - clip[0])} clip")
+        else:
+            self._length.setText("whole video" if self.whole_video() else "")

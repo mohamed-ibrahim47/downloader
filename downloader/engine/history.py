@@ -28,20 +28,25 @@ def _video_of(d: Download) -> str | None:
 
 def find_existing(downloads: Iterable[Download], url: str,
                   clip: tuple[int, int] | None = None) -> Existing | None:
+    """The download you already have for this link. For a video, any download of it counts (a
+    clip, or the whole video), the same part first; a finished one beats one still in the list."""
     vid = video_id(url)
-    in_list = None
+    finished, in_list = [], []
     for d in downloads:
         if vid:
-            if _video_of(d) != vid or d.clip != clip:
+            if _video_of(d) != vid:
                 continue
         elif d.kind is not Kind.FILE or not same_link(d.url, url):
             continue
         if d.status is Status.COMPLETED:
             if d.target_path.exists():
-                return Existing(d, True)
-        elif in_list is None:
-            in_list = Existing(d, False)
-    return in_list
+                finished.append(Existing(d, True))
+        else:
+            in_list.append(Existing(d, False))
+    for group in (finished, in_list):
+        if group:
+            return next((e for e in group if e.download.clip == clip), group[0])
+    return None
 
 
 def already_have(downloads: Iterable[Download], entries: Iterable[PlaylistEntry]) -> set[int]:
