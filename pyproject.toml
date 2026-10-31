@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "downloader"
-version = "1.1.0"
+version = "1.1.1"
 description = "A fast download manager for files, YouTube videos and playlists"
 readme = "README.md"
 license = { text = "MIT" }

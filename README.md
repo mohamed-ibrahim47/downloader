@@ -101,9 +101,11 @@ the folder is spotted too, and one that turns out identical to another is pointe
 **Delete this copy** or **Keep both**.
 
 ### Checks the file arrived intact
-Paste a checksum (SHA-256, SHA-1 or MD5) in the optional box, or let the app find the
-`SHA256SUMS` a site publishes next to the file. Once downloaded, the card says **✓ SHA-256
-verified**, or warns that the file may be damaged and keeps it aside, never under its real name.
+Paste a checksum (SHA-256, SHA-1 or MD5) in the optional box, or, on `https://` links, let the
+app find the `SHA256SUMS` a site publishes next to the file. Once downloaded, the card says
+**✓ matches the site's SHA-256**, or warns that the file may be damaged and keeps it aside,
+never under its real name. MD5 and SHA-1 are marked as weak checks. A checksum proves the file
+arrived intact, not that the site itself is trustworthy.
 
   </td>
   <td width="50%" valign="top">
