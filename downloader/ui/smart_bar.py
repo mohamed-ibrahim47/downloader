@@ -219,25 +219,21 @@ class SmartBar(QWidget):
             return
         self._set_state("checking")
         task = run_in_pool(probe if kind is LinkKind.FILE else fetch_info, text)
-        task.setProperty("token", self._token)
-        task.done.connect(self._on_result)
-        task.failed.connect(self._on_error)
+        task.tag = self._token
+        task.tagged_done.connect(self._on_result)
+        task.tagged_failed.connect(self._on_error)
 
-    def _current(self) -> bool:
-        task = self.sender()
-        return task is None or task.property("token") == self._token
-
-    @Slot(object)
-    def _on_result(self, result) -> None:
-        if not self._current():
+    @Slot(object, object)
+    def _on_result(self, token, result) -> None:
+        if token != self._token:
             return
         if isinstance(result, FileInfo):
             self._file = result
             self._set_state("file")
             if can_look_up(result.url):
                 task = run_in_pool(lookup_sums, result.url, result.filename)
-                task.setProperty("token", self._token)
-                task.done.connect(self._on_sums)
+                task.tag = self._token
+                task.tagged_done.connect(self._on_sums)
         elif isinstance(result, VideoInfo):
             self._video = result
             self.clip.set_video(result.duration, self.input.text().strip())
@@ -248,16 +244,16 @@ class SmartBar(QWidget):
             self._picked = {e.index for e in result.entries} - self._have
             self._set_state("playlist" if result.entries else "error")
 
-    @Slot(object)
-    def _on_sums(self, found) -> None:
-        if not self._current() or found is None:
+    @Slot(object, object)
+    def _on_sums(self, token, found) -> None:
+        if token != self._token or found is None:
             return
         self._found = found
         self._render()
 
-    @Slot(str)
-    def _on_error(self, message: str) -> None:
-        if not self._current():
+    @Slot(object, str)
+    def _on_error(self, token, message: str) -> None:
+        if token != self._token:
             return
         self._error = message
         self._set_state("error")

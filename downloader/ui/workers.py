@@ -14,9 +14,14 @@ class Task(QObject):
 
     done = Signal(object)
     failed = Signal(str)
+    # The same, with `tag` first: a receiver that may have moved on compares it instead of relying
+    # on QObject.sender(), which Qt doesn't guarantee for queued delivery.
+    tagged_done = Signal(object, object)
+    tagged_failed = Signal(object, str)
 
     def __init__(self):
         super().__init__()
+        self.tag = None
         self.done.connect(self._release)
         self.failed.connect(self._release)
 
@@ -34,12 +39,18 @@ class _Runnable(QRunnable):
         try:
             result = self._fn(*self._args)
         except DownloadError as e:
-            self._task.failed.emit(str(e))
+            self._fail(str(e))
         except Exception as e:  # yt-dlp and friends raise many kinds of errors
             from ..engine.youtube import friendly_error
-            self._task.failed.emit(friendly_error(str(e)) if str(e) else "couldn't read this link")
+            self._fail(friendly_error(str(e)) if str(e) else "couldn't read this link")
         else:
+            # Tagged first: `done` lets the task go.
+            self._task.tagged_done.emit(self._task.tag, result)
             self._task.done.emit(result)
+
+    def _fail(self, message: str) -> None:
+        self._task.tagged_failed.emit(self._task.tag, message)
+        self._task.failed.emit(message)
 
 
 def run_in_pool(fn, *args) -> Task:

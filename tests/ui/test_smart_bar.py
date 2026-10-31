@@ -462,3 +462,17 @@ def test_pasted_weak_checksum_is_labelled(bar, qtbot, monkeypatch):
     _file(bar, qtbot, monkeypatch)
     _sum_field(bar).setText("a" * 32)
     assert _sum_note(bar) == "MD5 · weak check · checked after download"
+
+
+def test_stale_results_are_refused_by_their_tag(bar, qtbot, monkeypatch):
+    # Nothing here has a Qt sender: the tag travelling with the result decides, and an old tag loses.
+    _file(bar, qtbot, monkeypatch)
+    found = (Checksum("sha256", H), "SHA256SUMS")
+    bar._on_sums(bar._token - 1, found)
+    assert _sum_note(bar) == ""
+    bar._on_error(bar._token - 1, "old link failed")
+    assert bar.state == "file"
+    bar._on_result(bar._token - 1, FileInfo("https://e.com/old.zip", "old.zip", 1, True))
+    assert _label(bar, "optTitle") == "a.zip"
+    bar._on_sums(bar._token, found)
+    assert _sum_note(bar) == "checksum found (SHA256SUMS)"
