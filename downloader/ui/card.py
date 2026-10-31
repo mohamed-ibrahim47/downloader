@@ -46,6 +46,12 @@ def _pct(d: Download) -> int | None:
     return min(100, int(d.downloaded * 100 / d.size))
 
 
+def _match_text(expected: Checksum, source: str | None) -> str:
+    """Says whose checksum matched: it proves the file is what that source described, no more."""
+    whose = f"the {expected.label} you pasted" if source == "pasted" else f"the site's {expected.label}"
+    return f"matches {whose} (weak check)" if expected.weak else f"✓ matches {whose}"
+
+
 def status_texts(d: Download, speed: float | None, eta: float | None) -> tuple[str, str]:
     """The coloured status line and the muted detail line under the progress bar."""
     pct = _pct(d)
@@ -81,7 +87,7 @@ def status_texts(d: Download, speed: float | None, eta: float | None) -> tuple[s
         status, parts = "Completed", [f"saved to {d.folder}"]
         expected = Checksum.from_stored(d.checksum)
         if d.verified and expected:
-            parts.append(f"✓ {expected.label} verified")
+            parts.append(_match_text(expected, d.checksum_source))
     if d.note:
         parts.append(d.note)
     return status, " · ".join(p for p in parts if p)

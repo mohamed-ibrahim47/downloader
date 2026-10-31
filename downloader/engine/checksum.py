@@ -17,6 +17,9 @@ from .probe import USER_AGENT
 ALGOS = {32: "md5", 40: "sha1", 64: "sha256", 128: "sha512"}
 LABELS = {"md5": "MD5", "sha1": "SHA-1", "sha256": "SHA-256", "sha512": "SHA-512"}
 SUMS_FILES = ("{name}.sha256", "{name}.sha256sum", "SHA256SUMS", "sha256sums.txt", "SHA512SUMS", "{name}.sha512")
+WEAK = ("md5", "sha1")  # still catch a damaged file, but can be forged on purpose
+# A sums file fetched over plain http could be swapped along with the download it vouches for.
+SECURE_SCHEMES = ("https",)
 READ_SIZE = 1 << 20
 
 _PASTED = re.compile(r"^(?:(md5|sha1|sha256|sha512):)?([0-9a-f]+)(?:\s+\*?\S.*)?$", re.I)
@@ -38,6 +41,10 @@ class Checksum:
     @property
     def label(self) -> str:
         return LABELS[self.algo]
+
+    @property
+    def weak(self) -> bool:
+        return self.algo in WEAK
 
 
 def _of(hex_text: str) -> Checksum | None:
@@ -122,9 +129,15 @@ def _fetch(url: str, timeout: float, limit: int) -> str | None:
         return None  # a slow or broken reply (raw reads raise urllib3's own errors)
 
 
+def can_look_up(url: str) -> bool:
+    return urlsplit(url).scheme.lower() in SECURE_SCHEMES
+
+
 def lookup_sums(url: str, filename: str, timeout: float = 10.0,
                 limit: int = 1_000_000) -> tuple[Checksum, str] | None:
     """Look next to the download (same site, same folder) for a published checksum."""
+    if not can_look_up(url):
+        return None
     parts = urlsplit(url)
     folder = parts.path.rsplit("/", 1)[0]
     for pattern in SUMS_FILES:

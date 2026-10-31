@@ -152,9 +152,20 @@ def test_status_checking():
 
 def test_status_verified():
     _, detail = status_texts(_d(status=Status.COMPLETED, verified=True, checksum=SHA), None, None)
-    assert detail.endswith("· ✓ SHA-256 verified")
-    _, detail = status_texts(_d(status=Status.COMPLETED, verified=True, checksum="md5:" + "a" * 32), None, None)
-    assert detail.endswith("· ✓ MD5 verified")
+    assert detail.endswith("· ✓ matches the site's SHA-256")
+    assert "verified" not in detail
+
+
+def test_status_pasted_checksum():
+    d = _d(status=Status.COMPLETED, verified=True, checksum=SHA, checksum_source="pasted")
+    assert status_texts(d, None, None)[1].endswith("· ✓ matches the SHA-256 you pasted")
+
+
+def test_status_weak_checksum_has_no_tick():
+    d = _d(status=Status.COMPLETED, verified=True, checksum="md5:" + "a" * 32, checksum_source="pasted")
+    assert status_texts(d, None, None)[1].endswith("· matches the MD5 you pasted (weak check)")
+    d = _d(status=Status.COMPLETED, verified=True, checksum="sha1:" + "a" * 40, checksum_source="x.sha1")
+    assert status_texts(d, None, None)[1].endswith("· matches the site's SHA-1 (weak check)")
 
 
 def test_status_paused_clip():

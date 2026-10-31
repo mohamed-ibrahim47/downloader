@@ -4,9 +4,16 @@ import time
 
 import pytest
 
+from downloader.engine import checksum as checksum_mod
 from downloader.engine.checksum import (Checksum, find_in_sums, hash_file, lookup_sums, parse_checksum)
 
 H256 = hashlib.sha256(b"hello").hexdigest()
+
+
+@pytest.fixture(autouse=True)
+def _local_test_server_counts_as_secure(monkeypatch):
+    """The test server speaks plain http; the real rule has its own tests below."""
+    monkeypatch.setattr(checksum_mod, "SECURE_SCHEMES", ("https", "http"))
 
 
 def test_parse_forms():
@@ -126,3 +133,23 @@ def test_lookup_refuses_compressed_reply(http_server):
     # Unpacking is where a "zip bomb" grows past the size limit: compressed replies aren't read at all.
     http_server.add("/rel/SHA256SUMS", (H256 + "  app.zip" + chr(10)).encode(), gzip="always")
     assert lookup_sums(http_server.url("/rel/app.zip"), "app.zip") is None
+
+
+def test_plain_http_is_never_looked_up(http_server, monkeypatch):
+    monkeypatch.setattr(checksum_mod, "SECURE_SCHEMES", ("https",))
+    http_server.add("/rel/SHA256SUMS", (H256 + "  app.zip" + chr(10)).encode())
+    url = http_server.url("/rel/app.zip")
+    assert not checksum_mod.can_look_up(url)
+    assert lookup_sums(url, "app.zip") is None
+    assert http_server.requests == []
+
+
+def test_https_can_be_looked_up(monkeypatch):
+    monkeypatch.setattr(checksum_mod, "SECURE_SCHEMES", ("https",))
+    assert checksum_mod.can_look_up("https://e.com/a.zip")
+    assert checksum_mod.can_look_up("HTTPS://e.com/a.zip")
+
+
+def test_weak_algorithms():
+    assert Checksum("md5", "a" * 32).weak and Checksum("sha1", "a" * 40).weak
+    assert not Checksum("sha256", "a" * 64).weak and not Checksum("sha512", "a" * 128).weak

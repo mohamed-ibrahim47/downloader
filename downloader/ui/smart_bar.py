@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QVBoxLayout, QWidget)
 
-from ..engine.checksum import lookup_sums, parse_checksum
+from ..engine.checksum import can_look_up, lookup_sums, parse_checksum
 from ..engine.linkkind import LinkKind, classify
 from ..engine.paths import safe_filename
 from ..engine.queue import MEDIA_EXTS
@@ -27,6 +27,7 @@ DEBOUNCE_MS = 400
 HINT_IDLE = "Copied links are picked up automatically"
 HINT_IDLE_NO_WATCH = "A file starts right away; a video or playlist shows its options first"
 BAD_CHECKSUM = "paste a checksum: 32, 40, 64 or 128 hex characters"
+HTTP_NO_LOOKUP = "http link, so no automatic check · paste a checksum from the site"
 
 
 def _plain(name: str) -> QLabel:
@@ -233,9 +234,10 @@ class SmartBar(QWidget):
         if isinstance(result, FileInfo):
             self._file = result
             self._set_state("file")
-            task = run_in_pool(lookup_sums, result.url, result.filename)
-            task.setProperty("token", self._token)
-            task.done.connect(self._on_sums)
+            if can_look_up(result.url):
+                task = run_in_pool(lookup_sums, result.url, result.filename)
+                task.setProperty("token", self._token)
+                task.done.connect(self._on_sums)
         elif isinstance(result, VideoInfo):
             self._video = result
             self.clip.set_video(result.duration, self.input.text().strip())
@@ -445,12 +447,15 @@ class SmartBar(QWidget):
         text = self._sum_input.text().strip()
         if text:
             pasted = parse_checksum(text)
-            note = f"{pasted.label} · checked after download" if pasted else BAD_CHECKSUM
+            if pasted:
+                note = f"{pasted.label} · {'weak check · ' if pasted.weak else ''}checked after download"
+            else:
+                note = BAD_CHECKSUM
             self.action.setEnabled(pasted is not None)
         elif self._found:
             note = f"checksum found ({self._found[1]})"
         else:
-            note = ""
+            note = "" if can_look_up(self._file.url) else HTTP_NO_LOOKUP
         self._sum_note.setText(note)
         bad = note == BAD_CHECKSUM
         if self._sum_note.property("bad") != bad:

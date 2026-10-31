@@ -442,3 +442,23 @@ def test_download_again_respects_invalid_clip(bar, qtbot, monkeypatch, tmp_path)
     before = len(bar.ctl.downloads())
     bar._download()
     assert len(bar.ctl.downloads()) == before
+
+
+def test_plain_http_link_is_not_looked_up(bar, qtbot, monkeypatch):
+    seen = []
+    monkeypatch.setattr(smart_bar, "lookup_sums", lambda url, name: seen.append(url))
+    _file(bar, qtbot, monkeypatch, url="http://e.com/a.zip")
+    qtbot.wait(100)
+    assert seen == []
+    assert _sum_note(bar) == "http link, so no automatic check · paste a checksum from the site"
+
+
+def test_https_link_shows_no_http_note(bar, qtbot, monkeypatch):
+    _file(bar, qtbot, monkeypatch)
+    assert _sum_note(bar) == ""
+
+
+def test_pasted_weak_checksum_is_labelled(bar, qtbot, monkeypatch):
+    _file(bar, qtbot, monkeypatch)
+    _sum_field(bar).setText("a" * 32)
+    assert _sum_note(bar) == "MD5 · weak check · checked after download"
