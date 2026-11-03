@@ -12,6 +12,38 @@ from downloader.engine.youtube import (
 FORMATS = json.loads((Path(__file__).parent / "fixtures" / "yt_formats.json").read_text())
 
 
+def _fake_ydl(info):
+    """A yt-dlp YoutubeDL stand-in: extract_info returns `info` and remembers what it was asked."""
+
+    class FakeYDL:
+        last_opts: dict | None = None
+        last_url: str | None = None
+
+        def __init__(self, opts):
+            FakeYDL.last_opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download=False):
+            FakeYDL.last_url = url
+            return info
+
+    return FakeYDL
+
+
+def test_fetch_info_keeps_tags(monkeypatch):
+    info = {"title": "Blank Space", "channel": "Taylor Swift", "duration": 272, "formats": [],
+            "webpage_url": "https://www.youtube.com/watch?v=e-ORhEE9VVg",
+            "tags": ["pop"] + [f"t{i}" for i in range(30)] + [None]}
+    monkeypatch.setattr("yt_dlp.YoutubeDL", _fake_ydl(info))
+    v = fetch_info("https://youtu.be/e-ORhEE9VVg")
+    assert v.tags[0] == "pop" and len(v.tags) == 20 and all(isinstance(t, str) for t in v.tags)
+
+
 def test_choose_720_exact():
     c = choose_format(FORMATS, "720p")
     assert c.height == 720

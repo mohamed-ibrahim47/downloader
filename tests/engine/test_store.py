@@ -126,6 +126,7 @@ def test_old_database_upgrades_in_place(tmp_path):
     assert (d.filename, d.status, d.downloaded, d.resumable) == ("a.zip", Status.COMPLETED, 5, True)
     assert (d.clip_start, d.video_id, d.checksum, d.verified, d.checking, d.duplicate_of) == \
         (None, None, None, False, False, None)
+    assert d.channel is None and d.tags is None
     d.verified = True
     store.update(d)
     assert store.get(1).verified is True
@@ -138,6 +139,21 @@ def test_new_fields_roundtrip(tmp_path):
                   checksum_source="SHA256SUMS", verified=True, duplicate_of="setup.zip")
     store.add(d)
     assert store.get(d.id) == d
+
+
+def test_channel_and_tags_round_trip(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    d = _download(kind=Kind.VIDEO, channel="Taylor Swift", tags='["pop", "live"]')
+    store.add(d)
+    got = store.get(d.id)
+    assert got.channel == "Taylor Swift" and got.tags == '["pop", "live"]'
+
+
+def test_query_and_execute(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    store.execute("CREATE TABLE t (a TEXT)")
+    store.execute("INSERT INTO t VALUES (?)", ("x",))
+    assert store.query("SELECT a FROM t") == [("x",)]
 
 
 def test_open_clears_checking(tmp_path):

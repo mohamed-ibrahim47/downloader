@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -14,6 +14,7 @@ from .ratelimit import TokenBucket
 
 QUALITIES = ("1080p", "720p", "480p", "Audio")
 MB_PER_MINUTE = {"1080p": 11.2, "720p": 8.4, "480p": 4.6, "Audio": 1.0}
+MAX_TAGS = 20  # tags kept per video; some videos carry hundreds
 
 
 @dataclass
@@ -23,6 +24,7 @@ class VideoInfo:
     channel: str
     duration: int | None
     formats: list[dict]
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -77,9 +79,11 @@ def fetch_info(url: str) -> VideoInfo | PlaylistInfo:
             entry_url = e.get("url") or f"https://www.youtube.com/watch?v={e.get('id')}"
             entries.append(PlaylistEntry(i, entry_url, e.get("title") or f"Video {i}", _int(e.get("duration"))))
         return PlaylistInfo(url=url, title=info.get("title") or "Playlist", entries=entries)
+    # Server data: keep only real strings, and only the first few.
+    tags = [t for t in (info.get("tags") or []) if isinstance(t, str)][:MAX_TAGS]
     return VideoInfo(url=info.get("webpage_url") or url, title=info.get("title") or "Video",
                      channel=info.get("channel") or info.get("uploader") or "",
-                     duration=_int(info.get("duration")), formats=info.get("formats") or [])
+                     duration=_int(info.get("duration")), formats=info.get("formats") or [], tags=tags)
 
 
 def _int(v) -> int | None:

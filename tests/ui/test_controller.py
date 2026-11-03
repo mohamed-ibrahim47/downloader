@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,19 @@ def test_add_file_queues_and_emits_changed(ctl, qtbot):
     assert d.folder == ctl.settings.folder_general
     assert d.connections == 8 and d.resumable and d.size == 1000
     assert d.status is Status.DOWNLOADING
+
+
+def test_add_video_keeps_channel_and_tags(ctl):
+    info = VideoInfo("https://youtu.be/x", "Song", "Taylor Swift", 200, [], ["pop", "1989"])
+    ctl.add_video(info, FormatChoice("s", 720, None, None, "mp4"))
+    d = ctl.downloads()[0]
+    assert d.channel == "Taylor Swift" and json.loads(d.tags) == ["pop", "1989"]
+
+
+def test_add_video_without_channel_or_tags_stores_none(ctl):
+    ctl.add_video(VideoInfo("u", "Song", "", None, []), FormatChoice("s", 720, None, None, "mp4"))
+    d = ctl.downloads()[0]
+    assert d.channel is None and d.tags is None
 
 
 def test_add_video_names_and_quality(ctl):

@@ -100,6 +100,16 @@ class Store:
         with self._lock, self._db:
             self._db.execute("DELETE FROM downloads WHERE id = ?", (download_id,))
 
+    def query(self, sql: str, params: tuple = ()) -> list[tuple]:
+        """Read rows from a table another engine module owns (the recommender's)."""
+        with self._lock:
+            return self._db.execute(sql, params).fetchall()
+
+    def execute(self, sql: str, params: tuple = ()) -> None:
+        """Write to a table another engine module owns, in its own transaction."""
+        with self._lock, self._db:
+            self._db.execute(sql, params)
+
     def get_setting(self, key: str, default: Any = None) -> Any:
         with self._lock:
             row = self._db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()

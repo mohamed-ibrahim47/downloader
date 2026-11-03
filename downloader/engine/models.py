@@ -67,6 +67,8 @@ class Download:
     verified: bool = False
     checking: bool = False  # hashing the finished file
     duplicate_of: str | None = None  # an identical file already in the folder
+    channel: str | None = None  # the video's channel; the recommender learns from it
+    tags: str | None = None  # the video's tags as JSON list text, at most youtube.MAX_TAGS
     segments: list[Segment] = field(default_factory=list)
 
     @property

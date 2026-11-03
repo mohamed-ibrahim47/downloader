@@ -1,6 +1,7 @@
 """Owns the engine and turns its worker-thread callbacks into Qt signals on the GUI thread."""
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import threading
@@ -127,7 +128,8 @@ class Controller(QObject):
                      audio_format=audio_format, title=info.title,
                      subtitles=self.settings.subtitles if subtitles is None else subtitles,
                      video_id=video_id(info.url), clip_start=clip[0] if clip else None,
-                     clip_end=clip[1] if clip else None)
+                     clip_end=clip[1] if clip else None, channel=info.channel or None,
+                     tags=json.dumps(info.tags) if info.tags else None)
         self.queue.add(d)
         if start_now:
             self.queue.start_now(d.id)
