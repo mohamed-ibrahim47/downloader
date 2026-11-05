@@ -15,6 +15,9 @@ from .ratelimit import TokenBucket
 QUALITIES = ("1080p", "720p", "480p", "Audio")
 MB_PER_MINUTE = {"1080p": 11.2, "720p": 8.4, "480p": 4.6, "Audio": 1.0}
 MAX_TAGS = 20  # tags kept per video; some videos carry hundreds
+MAX_TITLE = 300  # search results are server text: cap it before it is stored or shown
+MAX_CHANNEL = 100
+_VIDEO_ID = re.compile(r"[A-Za-z0-9_-]+")
 
 
 @dataclass
@@ -40,6 +43,15 @@ class PlaylistInfo:
     url: str
     title: str
     entries: list[PlaylistEntry]
+
+
+@dataclass
+class SearchHit:
+    video_id: str
+    url: str
+    title: str
+    channel: str | None
+    duration: int | None
 
 
 @dataclass
@@ -84,6 +96,31 @@ def fetch_info(url: str) -> VideoInfo | PlaylistInfo:
     return VideoInfo(url=info.get("webpage_url") or url, title=info.get("title") or "Video",
                      channel=info.get("channel") or info.get("uploader") or "",
                      duration=_int(info.get("duration")), formats=info.get("formats") or [], tags=tags)
+
+
+def search(query: str, limit: int = 15) -> list[SearchHit]:
+    """One YouTube search, flat: id, title, channel and duration, with no page load per video."""
+    import yt_dlp
+
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "extract_flat": True}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
+    hits = []
+    for e in (info or {}).get("entries") or []:
+        if not isinstance(e, dict):
+            continue
+        vid = e.get("id")
+        if not isinstance(vid, str) or not _VIDEO_ID.fullmatch(vid):
+            continue  # no id, or one that would make a strange URL
+        title = _text(e.get("title"))[:MAX_TITLE] or "Video"
+        channel = (_text(e.get("channel")) or _text(e.get("uploader")))[:MAX_CHANNEL] or None
+        hits.append(SearchHit(vid, f"https://www.youtube.com/watch?v={vid}", title, channel,
+                              _int(e.get("duration"))))
+    return hits
+
+
+def _text(v) -> str:
+    return v.strip() if isinstance(v, str) else ""
 
 
 def _int(v) -> int | None:

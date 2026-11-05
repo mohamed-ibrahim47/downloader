@@ -6,7 +6,7 @@ import pytest
 
 from downloader.engine.youtube import (
     PlaylistEntry, PlaylistInfo, VideoInfo, choose_format, estimate_playlist_size,
-    fetch_info, format_options, friendly_error,
+    fetch_info, format_options, friendly_error, search,
 )
 
 FORMATS = json.loads((Path(__file__).parent / "fixtures" / "yt_formats.json").read_text())
@@ -42,6 +42,33 @@ def test_fetch_info_keeps_tags(monkeypatch):
     monkeypatch.setattr("yt_dlp.YoutubeDL", _fake_ydl(info))
     v = fetch_info("https://youtu.be/e-ORhEE9VVg")
     assert v.tags[0] == "pop" and len(v.tags) == 20 and all(isinstance(t, str) for t in v.tags)
+
+
+def test_search_parses_flat_results(monkeypatch):
+    entries = [{"id": "abc", "title": "T" * 400, "channel": "C" * 150, "duration": 200.0},
+               {"id": None, "title": "no id"}, {"id": "def", "title": "x", "uploader": "U", "duration": None}]
+    fake = _fake_ydl({"_type": "playlist", "entries": entries})
+    monkeypatch.setattr("yt_dlp.YoutubeDL", fake)
+    hits = search("blank space", 15)
+    assert fake.last_url == "ytsearch15:blank space" and fake.last_opts["extract_flat"] is True
+    assert [h.video_id for h in hits] == ["abc", "def"]
+    assert hits[0].url == "https://www.youtube.com/watch?v=abc"
+    assert len(hits[0].title) == 300 and len(hits[0].channel) == 100 and hits[0].duration == 200
+    assert hits[1].channel == "U" and hits[1].duration is None
+
+
+def test_search_skips_odd_entries(monkeypatch):
+    # Server data: a missing entry, an id that would break the URL, a title that isn't text.
+    entries = [None, {"id": "a/b?c", "title": "bad id"}, {"id": "ok", "title": 5, "channel": ["x"]}]
+    monkeypatch.setattr("yt_dlp.YoutubeDL", _fake_ydl({"entries": entries}))
+    hits = search("q", 15)
+    assert [(h.video_id, h.title, h.channel) for h in hits] == [("ok", "Video", None)]
+
+
+@pytest.mark.network
+@pytest.mark.skipif(os.environ.get("RUN_NETWORK") != "1", reason="set RUN_NETWORK=1")
+def test_search_real():
+    assert len(search("big buck bunny", 3)) >= 1
 
 
 def test_choose_720_exact():
