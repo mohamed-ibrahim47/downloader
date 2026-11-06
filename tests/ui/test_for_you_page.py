@@ -1,0 +1,167 @@
+import random
+import time
+from types import SimpleNamespace
+
+import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton, QToolButton
+
+from downloader.engine.models import Download, Kind
+from downloader.engine.recommend.service import REFRESH_AFTER, Recommender
+from downloader.engine.store import Store
+from downloader.engine.youtube import SearchHit
+from downloader.ui.for_you_page import ForYouPage
+
+
+def _hits(q, title=None):
+    key = q.replace(" ", "_")
+    return [SearchHit(f"{key}{i:02}", f"https://www.youtube.com/watch?v={key}{i:02}",
+                      title or f"{q} song {i}", f"{q} ch{i % 5}", 200) for i in range(20)]
+
+
+def _failing(q, limit):
+    raise RuntimeError("offline")
+
+
+@pytest.fixture
+def store(tmp_path):
+    s = Store(tmp_path / "db.sqlite")
+    for title in ("Blank Space", "Style", "Shake It Off"):
+        s.add(Download(url="u", kind=Kind.VIDEO, filename="f", folder="d", title=title, channel="TS"))
+    yield s
+    s.close()
+
+
+@pytest.fixture
+def clock():
+    return SimpleNamespace(now=time.time())
+
+
+@pytest.fixture
+def calls():
+    return []
+
+
+@pytest.fixture
+def rec(store, clock, calls):
+    def search(q, limit):
+        calls.append(q)
+        return _hits(q)
+    return Recommender(store, search=search, clock=lambda: clock.now, rng=random.Random(0))
+
+
+@pytest.fixture
+def empty_rec(tmp_path):
+    s = Store(tmp_path / "empty.sqlite")
+    yield Recommender(s, search=lambda q, l: _hits(q))
+    s.close()
+
+
+@pytest.fixture
+def rec_with_html_title(store):
+    return Recommender(store, search=lambda q, l: _hits(q, "<b>bold</b> song"), rng=random.Random(0))
+
+
+def _page(qtbot, recommender):
+    page = ForYouPage(recommender)
+    qtbot.addWidget(page)
+    return page
+
+
+def _texts(widget):
+    return " ".join(label.text() for label in widget.findChildren(QLabel))
+
+
+def _title(card):
+    return card.findChild(QLabel, "title").text()
+
+
+def test_cold_start_message(qtbot, empty_rec):
+    page = _page(qtbot, empty_rec); page.open()
+    assert page.state == "cold" and "Download a few videos and suggestions will show up here." in _texts(page)
+
+
+def test_open_refreshes_then_lists(qtbot, rec):
+    page = _page(qtbot, rec); page.open()
+    qtbot.waitUntil(lambda: page.state == "list")
+    assert len(page.cards()) == 10 and "Because you downloaded" in _texts(page.cards()[0])
+
+
+def test_open_with_fresh_cache_does_not_search(qtbot, rec, calls):
+    rec.refresh(); calls.clear()
+    page = _page(qtbot, rec); page.open()
+    assert page.state == "list" and calls == []
+
+
+def test_dismiss_removes_card_without_searching(qtbot, rec, calls):
+    rec.refresh(); calls.clear()
+    page = _page(qtbot, rec); page.open()
+    title = _title(page.cards()[0])
+    qtbot.mouseClick(page.cards()[0].findChild(QPushButton, "dismiss"), Qt.LeftButton)
+    assert title not in [_title(c) for c in page.cards()] and calls == []
+
+
+def test_not_this_channel_hides_it_and_can_be_undone(qtbot, rec):
+    rec.refresh()
+    page = _page(qtbot, rec); page.open()
+    channel = page.suggestion(0).candidate.channel
+    page.cards()[0].findChild(QToolButton, "more").menu().actions()[0].trigger()
+    assert channel not in [page.suggestion(i).candidate.channel for i in range(len(page.cards()))]
+    unblock = page.findChild(QToolButton, "blocked").menu().actions()
+    assert [a.text() for a in unblock] == [f"Unblock {channel}"]
+    unblock[0].trigger()
+    assert rec.blocked_channels() == []
+
+
+def test_download_emits_url(qtbot, rec):
+    rec.refresh(); page = _page(qtbot, rec); page.open()
+    with qtbot.waitSignal(page.download_requested) as sig:
+        qtbot.mouseClick(page.cards()[0].findChild(QPushButton, "download"), Qt.LeftButton)
+    assert sig.args[0].startswith("https://www.youtube.com/watch?v=")
+
+
+def test_offline_keeps_cached_list(qtbot, rec, store, clock):
+    rec.refresh()
+    # The cache is just over REFRESH_AFTER old, so open() refreshes, and every search fails.
+    flaky = Recommender(store, search=_failing, clock=lambda: clock.now + REFRESH_AFTER + 1)
+    page = _page(qtbot, flaky); page.open()
+    qtbot.waitUntil(lambda: page.offline)
+    assert page.state == "list" and "Couldn't reach YouTube." in _texts(page)
+
+
+def test_late_result_is_ignored(qtbot, rec):
+    page = _page(qtbot, rec)
+    page.refresh(); first = page._token; page.refresh()
+    page._on_refreshed(first, None)  # the older result arrives last
+    assert page.state == "loading"
+    qtbot.waitUntil(lambda: page.state == "list")  # let the real refreshes finish before teardown
+
+
+def test_titles_are_plain_text(qtbot, rec_with_html_title):
+    page = _page(qtbot, rec_with_html_title); page.open()
+    qtbot.waitUntil(lambda: page.state == "list")
+    label = page.cards()[0].findChild(QLabel, "title")
+    assert label.textFormat() == Qt.PlainText and label.text() == "<b>bold</b> song"
+
+
+def test_reason_says_same_channel_when_no_words_are_shared(qtbot):
+    from downloader.engine.recommend.candidates import Candidate
+    from downloader.engine.recommend.rank import Suggestion
+    from downloader.ui.for_you_page import SuggestionCard
+    c = Candidate("v", "u", "Clean", "Taylor Swift", 200, "q")
+    card = SuggestionCard(Suggestion(c, 0.33, 0.18, 0.15, "Blank Space", []), False)
+    qtbot.addWidget(card)
+    assert card.reason.text() == "Because you downloaded Blank Space · same channel"
+    card = SuggestionCard(Suggestion(c, 0.3, 0.3, 0.0, "Blank Space", ["blank"]), False)
+    qtbot.addWidget(card)
+    assert card.reason.text() == "Because you downloaded Blank Space · blank"
+    assert card.more.text() == "…"
+
+
+def test_why_toggle_shows_scores_and_words(qtbot, rec):
+    rec.refresh(); page = _page(qtbot, rec); page.open()
+    page.show()  # isVisible() is only true for a widget in a shown window
+    assert not page.cards()[0].findChild(QLabel, "score").isVisible()
+    page.findChild(QCheckBox, "why").setChecked(True)
+    assert "score" in _texts(page.cards()[0]).lower() and page.findChild(QLabel, "profileWords").isVisible()
+    assert page.cards()[0].findChild(QLabel, "score").isVisible()

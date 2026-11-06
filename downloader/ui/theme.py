@@ -113,6 +113,19 @@ QProgressBar#cardBar {{ background: {c['track']}; border: none; border-radius: 3
 QToolButton#cardPrimary, QToolButton#cardRemove {{ background: transparent; border: 1px solid {c['border']};
     border-radius: 10px; }}
 QToolButton#cardPrimary:hover, QToolButton#cardRemove:hover {{ background: {c['surface2']}; }}
+QFrame#suggestionCard {{ background: {c['surface']}; border: 1px solid {c['cardBorder']}; border-radius: 12px; }}
+QFrame#suggestionCard QLabel#title {{ font-size: 14px; font-weight: 600; }}
+QFrame#suggestionCard QLabel#meta, QFrame#suggestionCard QLabel#reason {{ color: {c['muted']}; font-size: 12px; }}
+QFrame#suggestionCard QLabel#reason[discovery="true"] {{ color: {c['accent']}; }}
+QLabel#score, QLabel#profileWords {{ color: {c['muted']}; font-family: {MONO}; font-size: 12px; }}
+QLabel#offline {{ color: {c['error']}; font-size: 12px; }}
+QFrame#suggestionCard QPushButton#download {{ min-height: 30px; padding: 0 14px; border: none; border-radius: 9px;
+    background: {c['accent']}; color: {c['onAccent']}; font-weight: 600; }}
+QFrame#suggestionCard QPushButton#dismiss {{ min-height: 30px; padding: 0 12px; border: 1px solid {c['border']};
+    border-radius: 9px; background: transparent; }}
+QFrame#suggestionCard QToolButton#more, QToolButton#blocked {{ min-height: 30px; padding: 0 8px;
+    border: 1px solid {c['border']}; border-radius: 9px; background: transparent; }}
+QToolButton#more::menu-indicator, QToolButton#blocked::menu-indicator {{ image: none; width: 0; }}
 QPushButton#completedRow {{ min-height: 44px; padding: 0 14px; text-align: left; border-radius: 12px;
     border: 1px dashed {c['border']}; background: transparent; color: {c['muted']}; }}
 
