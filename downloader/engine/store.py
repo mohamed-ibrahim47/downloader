@@ -110,6 +110,12 @@ class Store:
         with self._lock, self._db:
             self._db.execute(sql, params)
 
+    def execute_many(self, statements: list[tuple[str, tuple]]) -> None:
+        """Several writes in one transaction: all of them happen, or none do."""
+        with self._lock, self._db:
+            for sql, params in statements:
+                self._db.execute(sql, params)
+
     def get_setting(self, key: str, default: Any = None) -> Any:
         with self._lock:
             row = self._db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()

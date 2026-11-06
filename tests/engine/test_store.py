@@ -156,6 +156,18 @@ def test_query_and_execute(tmp_path):
     assert store.query("SELECT a FROM t") == [("x",)]
 
 
+def test_execute_many_is_one_transaction(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    store.execute("CREATE TABLE t (a TEXT PRIMARY KEY)")
+    store.execute_many([("INSERT INTO t VALUES (?)", ("x",)), ("INSERT INTO t VALUES (?)", ("y",))])
+    try:
+        store.execute_many([("DELETE FROM t", ()), ("INSERT INTO t VALUES (?)", ("z",)),
+                            ("INSERT INTO t VALUES (?)", ("z",))])  # the duplicate fails…
+    except Exception:
+        pass
+    assert store.query("SELECT a FROM t ORDER BY a") == [("x",), ("y",)]  # …so the DELETE never happened
+
+
 def test_open_clears_checking(tmp_path):
     path = tmp_path / "db.sqlite"
     store = Store(path)
