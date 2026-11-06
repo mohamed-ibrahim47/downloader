@@ -57,8 +57,12 @@ class SettingsPage(QWidget):
         self._subs = QCheckBox("Download subtitles when a video has them", objectName="subtitles")
         self._subs.setChecked(settings.subtitles)
         self._subs.toggled.connect(lambda on: self._set(subtitles=on))
+        self._suggest = QCheckBox("Suggest videos on the For you page", objectName="suggest_videos")
+        self._suggest.setChecked(settings.suggest_videos)
+        self._suggest.toggled.connect(lambda on: self._set(suggest_videos=on))
         col.addWidget(self._number)
         col.addWidget(self._subs)
+        col.addWidget(self._suggest)
         col.addStretch(1)
 
     def set_settings(self, settings: Settings) -> None:

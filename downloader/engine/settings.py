@@ -29,6 +29,7 @@ class Settings:
     folder_playlist: str = field(default_factory=lambda: _downloads("Playlists"))
     number_playlist_files: bool = True
     subtitles: bool = False
+    suggest_videos: bool = True  # the For you page; off hides it and it never searches
     schedule: Schedule = field(default_factory=Schedule)
 
     @property

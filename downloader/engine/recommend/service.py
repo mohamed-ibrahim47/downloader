@@ -19,10 +19,11 @@ REFRESH_AFTER = 6 * 3600  # seconds: opening the page searches again only when t
 
 
 class Recommender:
-    def __init__(self, store: Store, search=youtube.search, clock=time.time, rng: random.Random | None = None):
+    def __init__(self, store: Store, search=None, clock=time.time, rng: random.Random | None = None):
         self.store = store
         self.log = RecLog(store)
-        self._search = search
+        # Looked up now, not when Python read this file, so a stubbed youtube.search is the one used.
+        self._search = search if search is not None else youtube.search
         self._clock = clock
         self._rng = rng or random.Random()
 

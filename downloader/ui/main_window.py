@@ -14,12 +14,14 @@ from ..engine.errors import CHECKSUM_MISMATCH
 from ..engine.linkkind import LinkKind, classify
 from ..engine.models import Kind, Status
 from ..engine.power import sleep_pc
+from ..engine.recommend.service import Recommender
 from ..engine.scheduler import due_action
 from ..engine.settings import Settings
 from ..engine.store import Store
 from .controller import Controller
 from .dialogs import confirm
 from .download_list import DownloadList
+from .for_you_page import ForYouPage
 from .formatting import fmt_speed
 from .icons import icon, pixmap
 from .pages import SchedulerPage, SettingsPage
@@ -31,14 +33,17 @@ from .title_bar import TitleBar, make_grips, place_grips
 from .tray import Tray
 
 CHIPS = (("all", "All"), ("active", "Active"), ("queued", "Queued"), ("completed", "Completed"))
-NAV = (("downloads", "list", "Downloads"), ("videos", "video", "Videos and playlists"),
-       ("queue", "gauge", "Queue"), ("scheduler", "clock", "Scheduler"), ("settings", "sliders", "Settings"))
+NAV = (("downloads", "list", "Downloads"), ("for_you", "spark", "For you"),
+       ("videos", "video", "Videos and playlists"), ("queue", "gauge", "Queue"), ("scheduler", "clock", "Scheduler"),
+       ("settings", "sliders", "Settings"))
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, controller: Controller, settings: Settings, store: Store):
+    def __init__(self, controller: Controller, settings: Settings, store: Store,
+                 recommender: Recommender | None = None):
         super().__init__()
         self.ctl, self.settings, self.store = controller, settings, store
+        self.recommender = recommender or Recommender(store)
         # The app draws its own title bar in the theme's colours (Windows' own can't follow it).
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint
                             | Qt.WindowSystemMenuHint)
@@ -66,9 +71,12 @@ class MainWindow(QMainWindow):
         self.queue_page = self.queue_panel
         self.scheduler_page = SchedulerPage(settings, self.apply_settings)
         self.settings_page = SettingsPage(settings, self.apply_settings)
-        for page in (self.queue_page, self.scheduler_page, self.settings_page):
+        self.for_you_page = ForYouPage(self.recommender)
+        self.for_you_page.download_requested.connect(self._download_suggestion)
+        for page in (self.for_you_page, self.queue_page, self.scheduler_page, self.settings_page):
             self.pages.addWidget(page)
         body.addWidget(self.pages, 1)
+        self._nav_buttons["for_you"].setVisible(settings.suggest_videos)
         self.setCentralWidget(root)
         self._grips = make_grips(self)  # resizing from the border, since there's no system frame
 
@@ -193,9 +201,21 @@ class MainWindow(QMainWindow):
             self.title.setText("Downloads" if key == "downloads" else "Videos and playlists")
             self.list.set_filter(self.list.mode, youtube_only=key == "videos")
             self._update_chips()
+        elif key == "for_you":
+            self.pages.setCurrentWidget(self.for_you_page)
+            self.for_you_page.open()  # searches only if the cache is old
         else:
             pages = {"queue": self.queue_page, "scheduler": self.scheduler_page, "settings": self.settings_page}
             self.pages.setCurrentWidget(pages[key])
+
+    def _go_to_downloads(self) -> None:
+        self._nav_buttons["downloads"].setChecked(True)
+        self._navigate(self._nav_buttons["downloads"])
+
+    def _download_suggestion(self, url: str) -> None:
+        """Hand a suggestion to the smart bar: the normal quality picker, clip option and duplicate check."""
+        self._go_to_downloads()
+        self.smart_bar.set_text(url)
 
     def _on_primary(self, download_id: int) -> None:
         d = self.ctl.get(download_id)
@@ -329,6 +349,9 @@ class MainWindow(QMainWindow):
         self.ctl.apply_settings(settings)
         self.queue_panel.set_settings(settings)
         self.settings_page.set_settings(settings)
+        self._nav_buttons["for_you"].setVisible(settings.suggest_videos)
+        if not settings.suggest_videos and self.pages.currentWidget() is self.for_you_page:
+            self._go_to_downloads()  # don't leave the owner on a page that just disappeared
         if theme_changed:
             self._apply_theme()
         else:

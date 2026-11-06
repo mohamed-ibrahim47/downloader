@@ -100,6 +100,14 @@ def test_no_suggestions_before_three_downloads(tmp_path):
     assert Recommender(store, search=_fake_search).suggestions() == []
 
 
+def test_default_search_is_read_when_built(store, monkeypatch):
+    # The default is looked up at construction, so tests (and the UI conftest) can stub youtube.search.
+    calls = []
+    monkeypatch.setattr("downloader.engine.youtube.search", lambda q, l: _fake_search(q, l, calls))
+    Recommender(store).refresh()
+    assert calls
+
+
 def test_refresh_does_not_search_before_three_downloads(tmp_path):
     store = Store(tmp_path / "db.sqlite")
     calls = []

@@ -1,3 +1,4 @@
+import dataclasses
 from datetime import datetime
 
 import pytest
@@ -5,11 +6,12 @@ from PySide6.QtCore import QTime
 from PySide6.QtWidgets import QCheckBox, QLineEdit, QPushButton, QTimeEdit
 
 from downloader.engine.models import Download, Kind, Status
+from downloader.engine.recommend.service import Recommender
 from downloader.engine.scheduler import Schedule
 from downloader.engine.settings import Settings
 from downloader.engine.store import Store
 from downloader.ui.controller import Controller
-from downloader.ui.main_window import MainWindow
+from downloader.ui.main_window import NAV, MainWindow
 from downloader.ui.pages import SchedulerPage, SettingsPage
 
 
@@ -74,12 +76,59 @@ def win(tmp_path, qtbot):
                        status=Status.PAUSED))
     settings = Settings(folder_general=str(tmp_path))
     ctl = Controller(store, settings, job_factory=IdleJob)
-    w = MainWindow(ctl, settings, store)
+    w = MainWindow(ctl, settings, store, recommender=Recommender(store, search=lambda q, l: []))
     w.tray = FakeTray()
     qtbot.addWidget(w)
     yield w
     ctl.shutdown()
     store.close()
+
+
+def test_for_you_sits_under_downloads_in_the_rail():
+    assert [key for key, _icon, _label in NAV][:2] == ["downloads", "for_you"]
+    assert dict((k, (i, l)) for k, i, l in NAV)["for_you"] == ("spark", "For you")
+
+
+def test_for_you_rail_opens_page(win):
+    win._nav_buttons["for_you"].click()
+    assert win.pages.currentWidget() is win.for_you_page
+
+
+def test_download_from_for_you_fills_smart_bar(win, monkeypatch):
+    seen = []
+    monkeypatch.setattr(win.smart_bar, "set_text", seen.append)
+    win._nav_buttons["for_you"].click()
+    win.for_you_page.download_requested.emit("https://www.youtube.com/watch?v=abc")
+    assert seen == ["https://www.youtube.com/watch?v=abc"] and win.pages.currentIndex() == 0
+    assert win._nav_buttons["downloads"].isChecked()
+
+
+def test_turning_suggestions_off_hides_the_page(win):
+    win._nav_buttons["for_you"].click()
+    win.apply_settings(dataclasses.replace(win.settings, suggest_videos=False))
+    assert win._nav_buttons["for_you"].isHidden() and win.pages.currentIndex() == 0
+    assert win._nav_buttons["downloads"].isChecked()
+
+
+def test_suggestions_off_at_start_hides_the_rail_button(tmp_path, qtbot):
+    store = Store(tmp_path / "db.sqlite")
+    settings = Settings(folder_general=str(tmp_path), suggest_videos=False)
+    ctl = Controller(store, settings, job_factory=IdleJob)
+    w = MainWindow(ctl, settings, store, recommender=Recommender(store, search=lambda q, l: []))
+    qtbot.addWidget(w)
+    assert w._nav_buttons["for_you"].isHidden()
+    ctl.shutdown()
+    store.close()
+
+
+def test_settings_page_suggest_toggle(qtbot):
+    got = []
+    page = SettingsPage(Settings(), got.append)
+    qtbot.addWidget(page)
+    box = page.findChild(QCheckBox, "suggest_videos")
+    assert box.text() == "Suggest videos on the For you page" and box.isChecked()
+    box.setChecked(False)
+    assert got[-1].suggest_videos is False
 
 
 def test_queue_finished_notify_calls_tray(win, qtbot):
