@@ -48,6 +48,11 @@ class Recommender:
     def ready(self) -> bool:
         return self.profile().ready
 
+    def cache_age(self) -> float | None:
+        """Seconds since the last refresh, on this recommender's clock; None if it never ran."""
+        last = self.log.last_refresh()
+        return None if last is None else max(0.0, self._clock() - last)
+
     def needs_refresh(self) -> bool:
         last = self.log.last_refresh()
         return last is None or self._clock() - last > REFRESH_AFTER

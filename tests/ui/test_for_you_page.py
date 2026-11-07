@@ -214,3 +214,23 @@ def test_offline_with_nothing_cached_shows_one_message(qtbot, store, clock):
     shown = [l.text() for l in page.findChildren(QLabel) if l.text() and not l.isHidden()]
     assert page.state == "empty" and "Couldn't reach YouTube." in shown
     assert "No new suggestions. Try Refresh later." not in shown
+
+
+def test_cards_drawn_while_the_page_is_shown_are_not_squashed(qtbot, rec):
+    # A Dismiss redraws the list while the page is on screen; the cards must keep their full height.
+    rec.refresh()
+    page = _page(qtbot, rec)
+    page.resize(940, 700)
+    page.show()
+    page.open()
+    qtbot.wait(50)
+    for card in page.cards():
+        assert card.height() >= card.minimumSizeHint().height()
+        assert card.height() >= card.sizeHint().height()
+
+
+def test_updated_uses_the_recommenders_clock(qtbot, rec, clock):
+    rec.refresh()
+    clock.now += 2 * 3600 + 5
+    page = _page(qtbot, rec); page.open()
+    assert "Updated 2 h ago" in _texts(page)

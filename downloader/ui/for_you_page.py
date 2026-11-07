@@ -6,11 +6,9 @@ that arrives late is ignored, so it can never overwrite a newer list.
 """
 from __future__ import annotations
 
-import time
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea,
-                               QToolButton, QVBoxLayout, QWidget)
+                               QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from ..engine.recommend.rank import Suggestion
 from ..engine.recommend.service import Recommender
@@ -47,6 +45,7 @@ def _ago(seconds: float) -> str:
 class SuggestionCard(QFrame):
     def __init__(self, s: Suggestion, show_score: bool, parent=None):
         super().__init__(parent, objectName="suggestionCard")
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)  # never shorter than its contents
         c = s.candidate
         col = QVBoxLayout(self)
         col.setContentsMargins(16, 12, 16, 12)
@@ -54,7 +53,9 @@ class SuggestionCard(QFrame):
 
         col.addWidget(ElidedLabel(c.title, objectName="title"))
         meta = " · ".join(x for x in (c.channel, fmt_clock(c.duration) if c.duration else None) if x)
-        col.addWidget(_plain(meta, "meta"))
+        # One line each, shortened with "…": a wrapping label's height depends on its width, and the scroll
+        # area doesn't count that, so wrapped cards got squashed when drawn while the page was on screen.
+        col.addWidget(ElidedLabel(meta, objectName="meta"))
         if s.discovery:
             reason = s.because or ""
         elif s.because:
@@ -63,11 +64,12 @@ class SuggestionCard(QFrame):
             reason = f"Because you downloaded {s.because}" + (f" · {why}" if why else "")
         else:
             reason = ""
-        self.reason = _plain(reason, "reason")
+        self.reason = ElidedLabel(reason, objectName="reason")
         self.reason.setProperty("discovery", s.discovery)
         self.reason.setVisible(bool(reason))
         col.addWidget(self.reason)
-        self.score = _plain(f"score {s.score:.2f} = similarity {s.similarity:.2f} + channel {s.boost:.2f}", "score")
+        self.score = ElidedLabel(f"score {s.score:.2f} = similarity {s.similarity:.2f} + channel {s.boost:.2f}",
+                                 objectName="score")
         self.score.setVisible(show_score)
         col.addWidget(self.score)
 
@@ -238,8 +240,8 @@ class ForYouPage(QWidget):
         # Offline with nothing to show: the red line says it all, so no second "try later" message.
         self._message.setText("" if self._shown else EMPTY)
         self._message.setVisible(not self._shown and not self.offline)
-        last = self._rec.log.last_refresh()
-        self._updated.setText(_ago(max(0.0, time.time() - last)) if last else "")
+        age = self._rec.cache_age()
+        self._updated.setText(_ago(age) if age is not None else "")
         if why:
             self._set_words(view.words)
         self._words.setVisible(why and bool(self._shown))
