@@ -51,6 +51,7 @@ def test_search_parses_flat_results(monkeypatch):
     monkeypatch.setattr("yt_dlp.YoutubeDL", fake)
     hits = search("blank space", 15)
     assert fake.last_url == "ytsearch15:blank space" and fake.last_opts["extract_flat"] is True
+    assert fake.last_opts["socket_timeout"] > 0  # a stalled search must end
     assert [h.video_id for h in hits] == ["abc", "def"]
     assert hits[0].url == "https://www.youtube.com/watch?v=abc"
     assert len(hits[0].title) == 300 and len(hits[0].channel) == 100 and hits[0].duration == 200

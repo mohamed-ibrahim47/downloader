@@ -113,3 +113,82 @@ def test_refresh_does_not_search_before_three_downloads(tmp_path):
     calls = []
     Recommender(store, search=lambda q, l: _fake_search(q, l, calls)).refresh()
     assert calls == []
+
+
+# ---- whole-branch review fixes -------------------------------------------------------------
+
+def _counting_all(store):
+    calls = []
+    real = store.all
+    store.all = lambda: (calls.append(1), real())[1]
+    return calls
+
+
+def test_view_reads_downloads_once(rec):
+    rec.refresh()
+    calls = _counting_all(rec.store)
+    v = rec.view(words=15)
+    assert v.ready and v.suggestions and v.words and len(calls) == 1
+
+
+def test_a_second_refresh_while_one_runs_does_not_search(store):
+    import threading
+    entered, release, calls = threading.Event(), threading.Event(), []
+
+    def slow(q, limit):
+        calls.append(q)
+        entered.set()
+        release.wait(5)
+        return _fake_search(q, limit)
+
+    rec = Recommender(store, search=slow)
+    t = threading.Thread(target=rec.refresh)
+    t.start()
+    assert entered.wait(5)
+    rec.refresh()  # returns at once: a refresh is already running
+    n = len(calls)
+    release.set()
+    t.join(5)
+    assert n == 1
+
+
+def test_shown_is_logged_once_per_video_per_refresh(rec):
+    rec.refresh()
+    first = rec.suggestions()
+    rec.dismiss(first[0])
+    rec.suggestions()  # a Dismiss re-ranks: videos that newly enter the list are new impressions
+    count = lambda: rec.store.query("SELECT COUNT(*) FROM rec_events WHERE event = 'shown'")[0][0]
+    after_dismiss = count()
+    rec.suggestions()  # a plain redraw is not
+    rows = rec.store.query("SELECT video_id FROM rec_events WHERE event = 'shown'")
+    assert count() == after_dismiss and len(rows) == len({r[0] for r in rows})
+
+
+def test_blocked_channel_is_not_searched(store):
+    calls = []
+    rec = Recommender(store, search=lambda q, l: _fake_search(q, l, calls))
+    rec.block_channel("TS")
+    rec.refresh()
+    assert calls and "TS" not in calls
+
+
+def test_discovery_pick_stays_after_a_dismiss(rec):
+    rec.refresh()
+    s = rec.suggestions()
+    picked = next(x.candidate.video_id for x in s if x.discovery)
+    rec.dismiss(s[0])
+    assert next(x.candidate.video_id for x in rec.suggestions() if x.discovery) == picked
+
+
+def test_a_refresh_that_finds_nothing_keeps_the_list(rec, store, clock):
+    rec.refresh()
+    before = rec.log.candidates()
+    clock.now += 7 * 3600
+    empty = Recommender(store, search=lambda q, l: [], clock=lambda: clock.now)
+    empty.refresh()
+    assert empty.log.candidates() == before and not empty.needs_refresh()
+
+
+def test_events_are_indexed(rec):
+    names = [r[0] for r in rec.store.query("SELECT name FROM sqlite_master WHERE type = 'index'")]
+    assert "rec_events_event" in names

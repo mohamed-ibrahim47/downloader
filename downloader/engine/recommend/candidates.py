@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from .. import youtube
 from ..errors import DownloadError
 from .profile import Profile
+from .text import tokenize
 from .tfidf import fit_idf, vector
 
 QUERIES_PER_REFRESH = 4  # up to 2 channel names, then word pairs
@@ -24,10 +25,6 @@ class Candidate:
     query: str  # the search that found it, kept for the learning log
 
 
-def _words(tokens: list[str]) -> list[str]:
-    return [t for t in tokens if not t.startswith("ch:")]
-
-
 def _pair(words: list[str], weight: float, idf: dict[str, float]) -> tuple[str, float] | None:
     """A doc's two best words, in the order they appear, and their summed score."""
     distinct = list(dict.fromkeys(words))  # unique, in order
@@ -40,9 +37,14 @@ def _pair(words: list[str], weight: float, idf: dict[str, float]) -> tuple[str, 
     return " ".join(best), scores[best[0]] + scores[best[1]]
 
 
-def queries(profile: Profile) -> list[str]:
-    channels = sorted(profile.channels, key=lambda name: -profile.channels[name])[:CHANNEL_QUERIES]
-    liked = [(_words(d.tokens), d.weight) for d in profile.docs if d.weight > 0]
+def queries(profile: Profile, blocked: set[str] | frozenset[str] = frozenset()) -> list[str]:
+    """Up to 2 channel names (never a blocked one), then word pairs from liked titles (spec B5).
+
+    Pairs come from the title only: tags are often SEO filler, and these words are sent to YouTube.
+    """
+    liked_channels = [name for name in profile.channels if name not in blocked]
+    channels = sorted(liked_channels, key=lambda name: -profile.channels[name])[:CHANNEL_QUERIES]
+    liked = [(tokenize(d.title), d.weight) for d in profile.docs if d.weight > 0]
     idf = fit_idf([words for words, _ in liked])
     pairs = [p for p in (_pair(words, weight, idf) for words, weight in liked) if p]
     pairs.sort(key=lambda p: -p[1])

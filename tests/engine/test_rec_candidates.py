@@ -8,8 +8,8 @@ from downloader.engine.youtube import SearchHit
 
 def test_queries_two_channels_then_two_word_pairs():
     p = Profile(docs=[ProfileDoc("1", "Blank Space", ["blank", "space", "ch:ts"], 1.0),
-                      ProfileDoc("2", "Style", ["style", "era", "ch:ts"], 1.0),
-                      ProfileDoc("3", "Piano", ["piano", "cover", "ch:other"], 0.5)],
+                      ProfileDoc("2", "Style Era", ["style", "era", "ch:ts"], 1.0),
+                      ProfileDoc("3", "Piano Cover", ["piano", "cover", "ch:other"], 0.5)],
                 channels={"TS": 1.0, "Other": 0.5, "Third": 0.2})
     q = queries(p)
     assert q[:2] == ["TS", "Other"] and len(q) == 4
@@ -17,9 +17,22 @@ def test_queries_two_channels_then_two_word_pairs():
 
 
 def test_queries_skip_negative_docs_and_duplicates():
-    p = Profile(docs=[ProfileDoc("1", "a", ["blank", "space"], 1.0), ProfileDoc("2", "b", ["blank", "space"], 1.0),
-                      ProfileDoc("x", "c", ["bad", "song"], -0.5)], channels={})
+    p = Profile(docs=[ProfileDoc("1", "Blank Space", ["blank", "space"], 1.0),
+                      ProfileDoc("2", "Blank Space", ["blank", "space"], 1.0),
+                      ProfileDoc("x", "Bad Song", ["bad", "song"], -0.5)], channels={})
     assert queries(p) == ["blank space"]
+
+
+def test_pairs_come_from_the_title_not_the_tags():
+    # Tags are often SEO filler; spec B5 builds pairs from words in one download's title.
+    p = Profile(docs=[ProfileDoc("1", "Song Title", ["song", "title", "trending", "viral", "viral"], 1.0)],
+                channels={})
+    assert queries(p) == ["song title"]
+
+
+def test_blocked_channels_are_not_queries():
+    p = Profile(docs=[], channels={"TS": 1.0, "Other": 0.5, "Third": 0.2})
+    assert queries(p, blocked={"TS"}) == ["Other", "Third"]
 
 
 def test_fetch_keeps_successes_when_a_query_fails():

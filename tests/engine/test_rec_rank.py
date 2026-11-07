@@ -57,6 +57,14 @@ def test_discovery_slot_at_five_from_ranks_11_to_30():
     assert s[4].candidate.video_id in {f"{i:02}" for i in range(10, 30)}
 
 
+def test_discovery_keeps_a_given_pick_while_it_is_in_range():
+    p = _profile(("song", None), ("song", None), ("song", None))
+    cands = [_c(f"{i:02}", f"song w{i:02}x", f"ch{i}") for i in range(40)]
+    for seed in range(5):
+        s = rank(p, cands, rng=random.Random(seed), discovery_id="17")
+        assert s[4].candidate.video_id == "17" and s[4].discovery
+
+
 def test_no_discovery_when_fewer_than_eleven():
     p = _profile(("a", None), ("b", None), ("c", None))
     assert not any(x.discovery for x in rank(p, [_c(str(i), "a", f"c{i}") for i in range(8)]))

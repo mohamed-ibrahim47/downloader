@@ -134,7 +134,7 @@ def test_late_result_is_ignored(qtbot, rec):
     page.refresh(); first = page._token; page.refresh()
     page._on_refreshed(first, None)  # the older result arrives last
     assert page.state == "loading"
-    qtbot.waitUntil(lambda: page.state == "list")  # let the real refreshes finish before teardown
+    qtbot.waitUntil(lambda: not page._busy)  # let the real refreshes finish before teardown
 
 
 def test_titles_are_plain_text(qtbot, rec_with_html_title):
@@ -165,3 +165,52 @@ def test_why_toggle_shows_scores_and_words(qtbot, rec):
     page.findChild(QCheckBox, "why").setChecked(True)
     assert "score" in _texts(page.cards()[0]).lower() and page.findChild(QLabel, "profileWords").isVisible()
     assert page.cards()[0].findChild(QLabel, "score").isVisible()
+
+
+# ---- whole-branch review fixes -------------------------------------------------------------
+
+def test_open_while_loading_does_not_start_another_refresh(qtbot, rec, calls):
+    page = _page(qtbot, rec); page.open()
+    token = page._token
+    page.open()  # e.g. Downloads → For you again while the first search runs
+    assert page._token == token
+    qtbot.waitUntil(lambda: page.state == "list")
+
+
+def test_cold_after_a_list_shows_the_message(qtbot, rec, store):
+    rec.refresh()
+    page = _page(qtbot, rec); page.open()
+    assert page.state == "list"
+    for d in store.all():
+        store.delete(d.id)
+    page.open()
+    message = [l for l in page.findChildren(QLabel) if l.text() == "Download a few videos and suggestions will show up here."]
+    assert page.state == "cold" and page.cards() == [] and message and not message[0].isHidden()
+
+
+def test_a_dismiss_reads_downloads_once(qtbot, rec, store):
+    rec.refresh()
+    page = _page(qtbot, rec); page.open()
+    calls = []
+    real = store.all
+    store.all = lambda: (calls.append(1), real())[1]
+    qtbot.mouseClick(page.cards()[0].findChild(QPushButton, "dismiss"), Qt.LeftButton)
+    assert len(calls) == 1
+
+
+def test_a_result_after_leaving_is_not_drawn_or_logged(qtbot, rec, store):
+    page = _page(qtbot, rec); page.open()
+    page.leave()
+    qtbot.waitUntil(lambda: not page._busy)
+    assert page.cards() == [] and store.query("SELECT COUNT(*) FROM rec_events WHERE event = 'shown'")[0][0] == 0
+    page.open()  # coming back draws the fresh cache without searching again
+    assert page.state == "list" and len(page.cards()) == 10
+
+
+def test_offline_with_nothing_cached_shows_one_message(qtbot, store, clock):
+    flaky = Recommender(store, search=_failing, clock=lambda: clock.now)
+    page = _page(qtbot, flaky); page.open()
+    qtbot.waitUntil(lambda: page.offline)
+    shown = [l.text() for l in page.findChildren(QLabel) if l.text() and not l.isHidden()]
+    assert page.state == "empty" and "Couldn't reach YouTube." in shown
+    assert "No new suggestions. Try Refresh later." not in shown

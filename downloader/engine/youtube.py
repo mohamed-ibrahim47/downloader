@@ -17,6 +17,7 @@ MB_PER_MINUTE = {"1080p": 11.2, "720p": 8.4, "480p": 4.6, "Audio": 1.0}
 MAX_TAGS = 20  # tags kept per video; some videos carry hundreds
 MAX_TITLE = 300  # search results are server text: cap it before it is stored or shown
 MAX_CHANNEL = 100
+SEARCH_TIMEOUT = 15  # seconds a stalled search may wait on the network before it gives up
 _VIDEO_ID = re.compile(r"[A-Za-z0-9_-]+")
 
 
@@ -102,7 +103,8 @@ def search(query: str, limit: int = 15) -> list[SearchHit]:
     """One YouTube search, flat: id, title, channel and duration, with no page load per video."""
     import yt_dlp
 
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "extract_flat": True}
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "extract_flat": True,
+            "socket_timeout": SEARCH_TIMEOUT}
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
     hits = []

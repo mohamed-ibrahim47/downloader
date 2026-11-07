@@ -94,6 +94,13 @@ def test_for_you_rail_opens_page(win):
     assert win.pages.currentWidget() is win.for_you_page
 
 
+def test_leaving_for_you_tells_the_page(win):
+    win._nav_buttons["for_you"].click()
+    assert win.for_you_page._active
+    win._nav_buttons["downloads"].click()
+    assert not win.for_you_page._active
+
+
 def test_download_from_for_you_fills_smart_bar(win, monkeypatch):
     seen = []
     monkeypatch.setattr(win.smart_bar, "set_text", seen.append)

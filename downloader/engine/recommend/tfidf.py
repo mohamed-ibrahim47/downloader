@@ -33,14 +33,21 @@ def weighted_sum(items: Iterable[tuple[dict[str, float], float]]) -> dict[str, f
     return total
 
 
-def _length(v: dict[str, float]) -> float:
+def norm(v: dict[str, float]) -> float:
+    """The vector's length, √(sum of squares)."""
     return math.sqrt(sum(x * x for x in v.values()))
 
 
-def cosine(a: dict[str, float], b: dict[str, float]) -> float:
-    """(a · b) / (|a| × |b|): 1 means the same direction, 0 means nothing in common."""
-    la, lb = _length(a), _length(b)
+def cosine(a: dict[str, float], b: dict[str, float], la: float | None = None, lb: float | None = None) -> float:
+    """(a · b) / (|a| × |b|): 1 means the same direction, 0 means nothing in common.
+
+    Pass the lengths when they are already known, to skip working them out again.
+    """
+    la = norm(a) if la is None else la
+    lb = norm(b) if lb is None else lb
     if la == 0 or lb == 0:
         return 0.0
+    if len(a) > len(b):
+        a, b = b, a  # walk the shorter vector
     dot = sum(value * b.get(word, 0.0) for word, value in a.items())
     return dot / (la * lb)

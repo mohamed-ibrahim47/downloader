@@ -196,6 +196,8 @@ class MainWindow(QMainWindow):
     def _navigate(self, button) -> None:
         self._paint_nav()
         key = button.property("key")
+        if key != "for_you":
+            self.for_you_page.leave()
         if key in ("downloads", "videos"):
             self.pages.setCurrentIndex(0)
             self.title.setText("Downloads" if key == "downloads" else "Videos and playlists")

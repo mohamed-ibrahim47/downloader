@@ -19,6 +19,8 @@ _TABLES = (
     "CREATE TABLE IF NOT EXISTS rec_events (id INTEGER PRIMARY KEY, video_id TEXT, event TEXT, title TEXT, "
     "channel TEXT, score REAL, rank INTEGER, features TEXT, at REAL)",
     "CREATE TABLE IF NOT EXISTS rec_blocked_channels (channel TEXT PRIMARY KEY, at REAL)",
+    # mark_downloaded and dismissed() look events up by type and video on every render.
+    "CREATE INDEX IF NOT EXISTS rec_events_event ON rec_events (event, video_id)",
 )
 
 _INSERT_EVENT = ("INSERT INTO rec_events (video_id, event, title, channel, score, rank, features, at) "
@@ -37,6 +39,10 @@ class RecLog:
         rows = [("INSERT OR IGNORE INTO rec_candidates VALUES (?, ?, ?, ?, ?, ?, ?)",
                  (c.video_id, c.url, c.title, c.channel, c.duration, c.query, now)) for c in cands]
         self.store.execute_many([("DELETE FROM rec_candidates", ()), *rows])
+        self.store.set_setting(_LAST_REFRESH, now)
+
+    def mark_refreshed(self, now: float) -> None:
+        """A refresh that found nothing: keep the old list, but don't search again on the next open."""
         self.store.set_setting(_LAST_REFRESH, now)
 
     def candidates(self) -> list[Candidate]:

@@ -22,6 +22,7 @@ from .workers import run_in_pool
 COLD = "Download a few videos and suggestions will show up here."
 EMPTY = "No new suggestions. Try Refresh later."
 LOADING = "Looking for new videos…"
+WORDS = 15  # profile words shown in "Why this order?"
 
 
 def _plain(text: str, name: str) -> QLabel:
@@ -99,6 +100,8 @@ class ForYouPage(QWidget):
         self._shown: list[Suggestion] = []
         self.state = "cold"
         self.offline = False
+        self._busy = False  # a refresh is running in the pool
+        self._active = False  # the page is the one on screen (open() until leave())
 
         page, col = _page("For you", "Videos picked from what you download, by this app's own ranking. "
                                      "Dismiss what you don't want and the list learns.")
@@ -155,17 +158,23 @@ class ForYouPage(QWidget):
 
     def open(self) -> None:
         """Called when the page is shown. Searches only when the cache is older than REFRESH_AFTER."""
-        if not self._rec.profile().ready:
-            self._set_state("cold")
-            self._clear_cards()
-            self._message.setText(COLD)
+        self._active = True
+        if self._busy:
+            return  # a search is already running; its result will draw the list
+        if not self._rec.ready():
+            self._show_cold()
         elif self._rec.needs_refresh():
             self.refresh()
         else:
             self._render()
 
+    def leave(self) -> None:
+        """Called when the owner moves to another page: a refresh that finishes now isn't drawn or logged."""
+        self._active = False
+
     def refresh(self) -> None:
         self._token += 1
+        self._busy = True
         self.state = "loading"  # the old cards stay up until the new list arrives
         self._updated.setText(LOADING)
         self._refresh.setEnabled(False)
@@ -177,44 +186,68 @@ class ForYouPage(QWidget):
     def _on_refreshed(self, token, _result) -> None:
         if token != self._token:
             return  # a newer refresh is running; this result is stale
+        self._busy = False
         self.offline = False
-        self._render()
+        self._finish()
 
     def _on_failed(self, token, message: str) -> None:
         if token != self._token:
             return
+        self._busy = False
         self.offline = True
         self._offline.setText(message)
-        self._render()
+        self._finish()
+
+    def _finish(self) -> None:
+        self._refresh.setEnabled(True)
+        if self._active:
+            self._render()  # otherwise open() draws the fresh cache when the owner comes back
 
     # ---- drawing ---------------------------------------------------------------------
 
     def _set_state(self, state: str) -> None:
-        self.state = state
-        self._refresh.setEnabled(True)
+        self.state = "loading" if self._busy else state
+        self._refresh.setEnabled(not self._busy)
         self._offline.setVisible(self.offline)
 
+    def _show_cold(self) -> None:
+        self._clear_cards()
+        self._shown = []
+        self._message.setText(COLD)
+        self._message.setVisible(True)
+        self._words.hide()
+        self._updated.setText("")
+        self._set_state("cold")
+
     def _render(self) -> None:
-        if not self._rec.profile().ready:
-            self.open()
+        """One read of the downloads per render (Recommender.view)."""
+        why = self._why.isChecked()
+        view = self._rec.view(words=WORDS if why else 0)
+        if not view.ready:
+            self._show_cold()
             return
-        self._shown = self._rec.suggestions()
+        self._shown = view.suggestions
         self._clear_cards()
         for s in self._shown:
-            card = SuggestionCard(s, self._why.isChecked())
+            card = SuggestionCard(s, why)
             card.download.clicked.connect(lambda _=False, url=s.candidate.url: self.download_requested.emit(url))
             card.dismiss.clicked.connect(lambda _=False, x=s: self._dismiss(x))
             card.block.triggered.connect(lambda _=False, ch=s.candidate.channel: self._block(ch))
             self._list.addWidget(card)
             self._cards.append(card)
+        # Offline with nothing to show: the red line says it all, so no second "try later" message.
         self._message.setText("" if self._shown else EMPTY)
-        self._message.setVisible(not self._shown)
+        self._message.setVisible(not self._shown and not self.offline)
         last = self._rec.log.last_refresh()
         self._updated.setText(_ago(max(0.0, time.time() - last)) if last else "")
-        self._words.setText("Your words: " + " · ".join(f"{w} {v:.2f}" for w, v in self._rec.words()))
-        self._words.setVisible(self._why.isChecked())
+        if why:
+            self._set_words(view.words)
+        self._words.setVisible(why and bool(self._shown))
         self._fill_blocked()
         self._set_state("list" if self._shown else "empty")
+
+    def _set_words(self, words: list[tuple[str, float]]) -> None:
+        self._words.setText("Your words: " + " · ".join(f"{w} {v:.2f}" for w, v in words))
 
     def _clear_cards(self) -> None:
         for card in self._cards:
@@ -232,7 +265,9 @@ class ForYouPage(QWidget):
         self._blocked.setVisible(bool(names))
 
     def _show_why(self, on: bool) -> None:
-        self._words.setVisible(on and self.state == "list")
+        if on and self._shown:
+            self._set_words(self._rec.words(WORDS))  # worked out only when asked for
+        self._words.setVisible(on and bool(self._shown))
         for card in self._cards:
             card.score.setVisible(on)
 

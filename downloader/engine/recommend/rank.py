@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from .candidates import Candidate
 from .profile import Profile
 from .text import tokenize
-from .tfidf import cosine, fit_idf, vector, weighted_sum
+from .tfidf import cosine, fit_idf, norm, vector, weighted_sum
 
 CHANNEL_BOOST = 0.15  # score added for a channel you like most (affinity 1.0)
 MAX_PER_CHANNEL = 2  # a channel appears at most this often in the list
@@ -28,24 +28,42 @@ class Suggestion:
     discovery: bool = False
 
 
-def _model(profile: Profile, cands: list[Candidate]):
-    """IDF over the profile docs and the candidates, the profile vector, and each candidate's vector."""
+@dataclass
+class Model:
+    """Everything ranking needs, built once: IDF, each liked download's vector and length, the profile."""
+    idf: dict[str, float]
+    doc_vecs: list[dict[str, float]]
+    doc_norms: list[float]
+    profile_vec: dict[str, float]
+    profile_norm: float
+    cand_tokens: list[list[str]]
+    index: dict[str, list[int]]  # word -> the liked downloads that have it
+
+
+def build_model(profile: Profile, cands: list[Candidate]) -> Model:
     cand_tokens = [tokenize(c.title, channel=c.channel) for c in cands]
     idf = fit_idf([d.tokens for d in profile.docs] + cand_tokens)
     doc_vecs = [vector(d.tokens, idf) for d in profile.docs]
     profile_vec = weighted_sum(zip(doc_vecs, (d.weight for d in profile.docs)))
-    return idf, doc_vecs, profile_vec, cand_tokens
+    index: dict[str, list[int]] = {}
+    for i, (doc, vec) in enumerate(zip(profile.docs, doc_vecs)):
+        if doc.weight > 0:
+            for word in vec:
+                index.setdefault(word, []).append(i)
+    return Model(idf, doc_vecs, [norm(v) for v in doc_vecs], profile_vec, norm(profile_vec), cand_tokens, index)
 
 
-def _explain(profile: Profile, doc_vecs: list[dict], cand_vec: dict, cand_tokens: list[str]):
-    """The liked download most like this candidate, and the words they share."""
+def _explain(profile: Profile, m: Model, cand_vec: dict, cand_norm: float, cand_tokens: list[str]):
+    """The liked download most like this candidate, and the words they share.
+
+    Only downloads that share a word with the candidate can have a cosine above 0, so only those are scored.
+    """
+    near = sorted({i for word in cand_vec for i in m.index.get(word, ())})  # doc order: ties go to the first
     best, best_cos = None, 0.0
-    for doc, vec in zip(profile.docs, doc_vecs):
-        if doc.weight <= 0:
-            continue
-        c = cosine(vec, cand_vec)
+    for i in near:
+        c = cosine(m.doc_vecs[i], cand_vec, m.doc_norms[i], cand_norm)
         if c > best_cos:
-            best, best_cos = doc, c
+            best, best_cos = profile.docs[i], c
     if best is None:
         return None, []
     words = [t for t in dict.fromkeys(cand_tokens) if not t.startswith("ch:") and t in best.tokens]
@@ -53,16 +71,19 @@ def _explain(profile: Profile, doc_vecs: list[dict], cand_vec: dict, cand_tokens
     return best.title, words[:3]
 
 
-def rank(profile: Profile, cands: list[Candidate], k: int = TOP_K,
-         rng: random.Random | None = None) -> list[Suggestion]:
+def rank(profile: Profile, cands: list[Candidate], k: int = TOP_K, rng: random.Random | None = None,
+         discovery_id: str | None = None, model: Model | None = None) -> list[Suggestion]:
+    """`discovery_id`: keep this video in the discovery slot while it is still in range, so the slot
+    doesn't change under the owner after a Dismiss."""
     rng = rng or random.Random()
-    idf, doc_vecs, profile_vec, cand_tokens = _model(profile, cands)
+    m = model or build_model(profile, cands)
     scored = []
-    for c, tokens in zip(cands, cand_tokens):
-        vec = vector(tokens, idf)
-        similarity = cosine(profile_vec, vec)
+    for c, tokens in zip(cands, m.cand_tokens):
+        vec = vector(tokens, m.idf)
+        vec_norm = norm(vec)
+        similarity = cosine(m.profile_vec, vec, m.profile_norm, vec_norm)
         boost = CHANNEL_BOOST * profile.channels.get(c.channel, 0.0) if c.channel else 0.0
-        because, shared = _explain(profile, doc_vecs, vec, tokens)
+        because, shared = _explain(profile, m, vec, vec_norm, tokens)
         scored.append(Suggestion(c, similarity + boost, similarity, boost, because, shared))
     scored.sort(key=lambda s: (-s.score, s.candidate.video_id))
 
@@ -79,15 +100,17 @@ def rank(profile: Profile, cands: list[Candidate], k: int = TOP_K,
     # Exploration: move one decent-but-not-top pick into slot DISCOVERY_POSITION.
     low, high = DISCOVERY_RANKS
     if len(diverse) >= low:
-        pick = rng.choice(diverse[low - 1:high])
+        pool = diverse[low - 1:high]
+        pick = next((s for s in pool if s.candidate.video_id == discovery_id), None) or rng.choice(pool)
         diverse.remove(pick)
         diverse.insert(DISCOVERY_POSITION - 1, replace(pick, discovery=True, because=DISCOVERY_COPY))
     return diverse[:k]
 
 
-def profile_words(profile: Profile, cands: list[Candidate], n: int = 15) -> list[tuple[str, float]]:
+def profile_words(profile: Profile, cands: list[Candidate], n: int = 15,
+                  model: Model | None = None) -> list[tuple[str, float]]:
     """The profile's heaviest words, for the "Why this order?" view. Channels are left out."""
-    _, _, profile_vec, _ = _model(profile, cands)
-    words = [(w, v) for w, v in profile_vec.items() if not w.startswith("ch:")]
+    m = model or build_model(profile, cands)
+    words = [(w, v) for w, v in m.profile_vec.items() if not w.startswith("ch:")]
     words.sort(key=lambda wv: -wv[1])
     return words[:n]
