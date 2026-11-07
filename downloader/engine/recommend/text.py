@@ -7,8 +7,12 @@ from typing import Iterable
 # Common words that say nothing about taste.
 STOP_WORDS = frozenset({
     "the", "a", "an", "and", "or", "of", "for", "to", "in", "on", "at", "by", "with", "from", "it", "off",
-    "is", "my", "your", "you", "me", "this", "that",
+    "is", "my", "your", "you", "me", "this", "that", "but", "what", "how", "why", "la",
     "في", "من", "على", "عن", "مع", "و", "يا", "ال",
+    # Numbering and filler, found topping the profile in the month-long simulation
+    # ("Nocturne Op. 9 No. 2", "Planet Earth II - Part 3 | Special Episode"). A one-time list: the long
+    # tail is left to TF-IDF now, and to learned embeddings (v4) later.
+    "no", "op", "ii", "iii", "iv", "part", "ep", "episode", "special", "vol", "chapter",
 })
 
 # Words that describe the upload, not the video (spec B3).
