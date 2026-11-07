@@ -38,17 +38,25 @@ def _pair(words: list[str], weight: float, idf: dict[str, float]) -> tuple[str, 
 
 
 def queries(profile: Profile, blocked: set[str] | frozenset[str] = frozenset()) -> list[str]:
-    """Up to 2 channel names (never a blocked one), then word pairs from liked titles (spec B5).
+    """Up to 2 channel names (never a blocked one), the newest download, then word pairs (spec B5).
 
+    The newest download always gets a search of its own. Without it, every search came from the old
+    favourites, so a new interest never reached YouTube (seen in the month-long simulation).
     Pairs come from the title only: tags are often SEO filler, and these words are sent to YouTube.
     """
     liked_channels = [name for name in profile.channels if name not in blocked]
     channels = sorted(liked_channels, key=lambda name: -profile.channels[name])[:CHANNEL_QUERIES]
     liked = [(tokenize(d.title), d.weight) for d in profile.docs if d.weight > 0]
     idf = fit_idf([words for words, _ in liked])
+    out = list(channels)
+    newest = max(liked, key=lambda wd: wd[1], default=None)  # weight falls with age: the highest is the newest
+    if newest and newest[0]:
+        fresh = _pair(*newest, idf)
+        text = fresh[0] if fresh else newest[0][0]  # a one-word title is searched as that word
+        if text not in out:
+            out.append(text)
     pairs = [p for p in (_pair(words, weight, idf) for words, weight in liked) if p]
     pairs.sort(key=lambda p: -p[1])
-    out = list(channels)
     for text, _score in pairs:
         if len(out) >= QUERIES_PER_REFRESH:
             break

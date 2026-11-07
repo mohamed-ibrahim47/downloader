@@ -11,6 +11,7 @@ from .tfidf import cosine, fit_idf, norm, vector, weighted_sum
 
 CHANNEL_BOOST = 0.15  # score added for a channel you like most (affinity 1.0)
 MAX_PER_CHANNEL = 2  # a channel appears at most this often in the list
+MAX_PER_QUERY = 3  # cards from one search in the top list, while other searches have something to offer
 TOP_K = 10
 DISCOVERY_POSITION = 5  # 1-based slot for "something a little different"
 DISCOVERY_RANKS = (11, 30)  # 1-based, inclusive: where the discovery pick comes from
@@ -97,11 +98,28 @@ def rank(profile: Profile, cands: list[Candidate], k: int = TOP_K, rng: random.R
             used[ch] = used.get(ch, 0) + 1
         diverse.append(s)
 
+    # Variety across searches: one search (one song, say) gets at most MAX_PER_QUERY of the top k places.
+    # It's a soft limit: when the other searches run out, the list is filled from the rest in score order.
+    # What is held back stays in the list below the top k, so the discovery pick can still come from it.
+    top, rest, per_query = [], [], {}
+    for s in diverse:
+        q = s.candidate.query
+        if len(top) < k and per_query.get(q, 0) < MAX_PER_QUERY:
+            per_query[q] = per_query.get(q, 0) + 1
+            top.append(s)
+        else:
+            rest.append(s)
+    diverse = top + rest  # if top is short of k, the first of `rest` fill it
+
     # Exploration: move one decent-but-not-top pick into slot DISCOVERY_POSITION.
     low, high = DISCOVERY_RANKS
     if len(diverse) >= low:
         pool = diverse[low - 1:high]
-        pick = next((s for s in pool if s.candidate.video_id == discovery_id), None) or rng.choice(pool)
+        # Prefer a pick whose search isn't already at its limit among the cards that stay on show.
+        stays = diverse[:k - 1]
+        open_pool = [s for s in pool
+                     if sum(x.candidate.query == s.candidate.query for x in stays) < MAX_PER_QUERY] or pool
+        pick = next((s for s in open_pool if s.candidate.video_id == discovery_id), None) or rng.choice(open_pool)
         diverse.remove(pick)
         diverse.insert(DISCOVERY_POSITION - 1, replace(pick, discovery=True, because=DISCOVERY_COPY))
     return diverse[:k]

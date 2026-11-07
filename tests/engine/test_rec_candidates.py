@@ -35,6 +35,21 @@ def test_blocked_channels_are_not_queries():
     assert queries(p, blocked={"TS"}) == ["Other", "Third"]
 
 
+def test_the_newest_download_always_gets_a_search():
+    # Old favourites outscore it (shorter titles, more of them), but a new interest must reach YouTube.
+    old = [ProfileDoc(str(i), t, [], 0.7) for i, t in enumerate(["Blank Space", "Style Era", "Shake Cover"])]
+    new = ProfileDoc("9", "Interstellar Official Trailer Christopher Nolan Movie Scene", [], 1.0)
+    p = Profile(docs=[new, *old], channels={"TS": 1.0, "Other": 0.5})
+    q = queries(p)
+    assert q[:2] == ["TS", "Other"] and "interstellar trailer" in q and len(q) == 4
+
+
+def test_a_one_word_newest_title_is_still_searched():
+    p = Profile(docs=[ProfileDoc("9", "Interstellar", [], 1.0), ProfileDoc("1", "Blank Space", [], 0.5)],
+                channels={})
+    assert queries(p)[0] == "interstellar"
+
+
 def test_fetch_keeps_successes_when_a_query_fails():
     def search(q, limit):
         if q == "bad":

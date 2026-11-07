@@ -17,8 +17,8 @@ def _profile(*items):
     return build_profile(downloads, [], NOW)
 
 
-def _c(vid, title, channel):
-    return Candidate(vid, "u", title, channel, 200, "q")
+def _c(vid, title, channel, query="q"):
+    return Candidate(vid, "u", title, channel, 200, query)
 
 
 def test_closer_title_ranks_higher_and_explains_itself():
@@ -39,6 +39,21 @@ def test_at_most_two_per_channel():
     p = _profile(("song one", "TS"), ("song two", "TS"), ("song three", "TS"))
     s = rank(p, [_c(str(i), f"song {i}", "TS") for i in range(5)] + [_c("o", "song other", "Else")])
     assert sum(x.candidate.channel == "TS" for x in s) == 2
+
+
+def test_at_most_three_from_one_search_when_there_is_enough_else():
+    # The simulation's day 12: six versions of one song, each from its own channel, from one search.
+    p = _profile(("song one", None), ("song two", None), ("song three", None))
+    cands = [_c(f"{q}{i}", f"song {q} {i}", f"{q}-ch{i}", query=q) for q in "abcd" for i in range(4)]
+    for seed in range(30):  # the discovery pick is random: it must not break the limit either
+        s = rank(p, cands, rng=random.Random(seed))
+        assert len(s) == 10
+        assert max(sum(x.candidate.query == q for x in s) for q in "abcd") <= 3
+
+
+def test_one_search_may_fill_the_list_when_it_is_all_there_is():
+    p = _profile(("song one", None), ("song two", None), ("song three", None))
+    assert len(rank(p, [_c(str(i), f"song {i}", f"ch{i}") for i in range(8)])) == 8
 
 
 def test_missing_channels_are_not_one_channel():
