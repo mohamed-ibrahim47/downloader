@@ -133,6 +133,16 @@ Close the window and downloads carry on. You get a note when something finishes 
   </tr>
 </table>
 
+### For you: suggestions it can explain
+After a few video downloads, the **For you** page suggests YouTube videos picked by the app's own
+ranking, not YouTube's: it searches for your favourite channels and title words, scores what it
+finds with TF-IDF against what you've downloaded, and keeps the list varied (at most two per
+channel, plus one "something a little different"). Every card says why it's there
+(**Because you downloaded … · shared words**), and **Why this order?** shows the score behind it.
+**Dismiss** and **Not this channel** teach it what you don't want. It only searches when you open
+the page or press **Refresh**, and nothing leaves your PC except that search. Turn it off in
+Settings.
+
 ## Install
 
 1. Download `downloader-<version>-windows.zip` from the [latest release](../../releases/latest).
@@ -176,6 +186,7 @@ powershell -File scripts\build_exe.ps1   # set DOWNLOADER_BUILD to choose the ou
 | Part | What it does |
 |---|---|
 | `downloader/engine` | Plain Python, no Qt: link detection, multi-connection HTTP downloads with resume, the queue, the scheduler, YouTube through yt-dlp, and a SQLite store. |
+| `downloader/engine/recommend` | The For you recommender, plain Python with no ML library: words, hand-written TF-IDF, a profile that fades with age, YouTube search queries, ranking with reasons, and a SQLite log of what was shown and what you did with it. |
 | `downloader/ui` | PySide6 window. A controller turns the engine's background-thread events into Qt signals, so the window never waits on the network. |
 | `scripts/` | Building the `.exe` (PyInstaller) and drawing the app icon. |
 
