@@ -143,6 +143,14 @@ channel, plus one "something a little different"). Every card says why it's ther
 the page or press **Refresh**, and nothing leaves your PC except that search. Turn it off in
 Settings.
 
+It also learns from what you do. Every suggestion you download, dismiss or scroll past trains a
+small logistic-regression model on your PC, written by hand with gradient descent. Once it has
+enough to go on (200 suggestions and 15 downloads), it is tested against the hand-tuned ranking on
+your most recent lists, and it takes over only if it does at least as well. **Why this order?** says
+which ranking is on, how far learning has got, and what the model learned. Running from source with
+`pip install -e .[ml]` adds scikit-learn as a second trainer, so you can compare its weights with
+the hand-written one; the .exe uses the hand-written trainer only.
+
 ## Install
 
 1. Download `downloader-<version>-windows.zip` from the [latest release](../../releases/latest).
@@ -168,7 +176,7 @@ Set `DOWNLOADER_HOME` to keep the downloads list and settings somewhere other th
 ### Tests
 
 ```bash
-pip install -e .[dev]
+pip install -e .[dev,ml]         # ml is optional: it adds scikit-learn's trainer and its tests
 python -m pytest                 # add RUN_NETWORK=1 to include the tests that talk to YouTube
 ```
 
