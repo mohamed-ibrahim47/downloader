@@ -85,3 +85,13 @@ def test_a_row_carries_the_models_inputs():
     log.act("a", "downloaded")
     r = rows(log.events)[0]
     assert isinstance(r, Row) and len(r.x) == 8 and r.x[0] == 0.5 and r.at == 1.0
+
+
+def test_once_a_new_refresh_is_open_the_old_list_is_settled():
+    # Training runs right after a refresh: the list the owner just looked at is done, even before the new
+    # list has been shown.
+    log = Log()
+    log.shown("a", 1.0)
+    log.shown("b", 1.0)
+    assert _labels(log) == []
+    assert [r.video_id for r in rows(log.events, open_refresh=2.0)] == ["a", "b"]

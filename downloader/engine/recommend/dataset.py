@@ -30,19 +30,20 @@ class Row:
     at: float
 
 
-def rows(events: list[tuple], limit: int = MAX_ROWS) -> list[Row]:
+def rows(events: list[tuple], limit: int = MAX_ROWS, open_refresh: float | None = None) -> list[Row]:
     """`events`: (id, video_id, event, features_json, at, refresh) tuples in id order, as
     `RecLog.events()` returns them.
 
     - A download or dismissal belongs to the video's last showing before it; earlier showings count as
       scrolled past.
-    - Untouched rows of the newest refresh are left out: the owner may still act on them.
+    - Untouched rows of the list still on the page are left out: the owner may still act on them. That
+      list is `open_refresh` (the latest refresh), or by default the newest list shown.
     - Rows logged before 1.2.1 (no refresh) are left out: they lack the search kind.
     """
     shown = [e for e in events if e[2] == "shown" and e[5] is not None and e[3]]
     if not shown:
         return []
-    newest = max(e[5] for e in shown)
+    newest = open_refresh if open_refresh is not None else max(e[5] for e in shown)
     # For each video, its actions in order: (event id, label).
     actions: dict[str, list[tuple[int, int]]] = {}
     for eid, vid, event, *_ in events:

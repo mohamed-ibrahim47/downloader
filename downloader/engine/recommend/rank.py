@@ -73,9 +73,12 @@ def _explain(profile: Profile, m: Model, cand_vec: dict, cand_norm: float, cand_
 
 
 def rank(profile: Profile, cands: list[Candidate], k: int = TOP_K, rng: random.Random | None = None,
-         discovery_id: str | None = None, model: Model | None = None) -> list[Suggestion]:
+         discovery_id: str | None = None, model: Model | None = None, scorer=None) -> list[Suggestion]:
     """`discovery_id`: keep this video in the discovery slot while it is still in range, so the slot
-    doesn't change under the owner after a Dismiss."""
+    doesn't change under the owner after a Dismiss.
+
+    `scorer(suggestion, affinity) -> float`: a learned score in place of v1's similarity + boost. Everything
+    after the score (variety, discovery) stays the same."""
     rng = rng or random.Random()
     m = model or build_model(profile, cands)
     scored = []
@@ -83,9 +86,13 @@ def rank(profile: Profile, cands: list[Candidate], k: int = TOP_K, rng: random.R
         vec = vector(tokens, m.idf)
         vec_norm = norm(vec)
         similarity = cosine(m.profile_vec, vec, m.profile_norm, vec_norm)
-        boost = CHANNEL_BOOST * profile.channels.get(c.channel, 0.0) if c.channel else 0.0
+        affinity = profile.channels.get(c.channel, 0.0) if c.channel else 0.0
+        boost = CHANNEL_BOOST * affinity
         because, shared = _explain(profile, m, vec, vec_norm, tokens)
-        scored.append(Suggestion(c, similarity + boost, similarity, boost, because, shared))
+        s = Suggestion(c, similarity + boost, similarity, boost, because, shared)
+        if scorer is not None:
+            s.score = scorer(s, affinity)
+        scored.append(s)
     scored.sort(key=lambda s: (-s.score, s.candidate.video_id))
 
     # Diversity: skip a channel once it has MAX_PER_CHANNEL places. No channel never counts as one.

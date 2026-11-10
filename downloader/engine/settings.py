@@ -30,6 +30,8 @@ class Settings:
     number_playlist_files: bool = True
     subtitles: bool = False
     suggest_videos: bool = True  # the For you page; off hides it and it never searches
+    rec_learned: bool = True  # For you: rank with the learned model (v2) once it beats v1
+    rec_trainer: str = "hand"  # "hand" (our gradient descent) or "sklearn" (when it's installed)
     schedule: Schedule = field(default_factory=Schedule)
 
     @property

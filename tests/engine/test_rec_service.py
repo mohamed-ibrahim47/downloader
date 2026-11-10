@@ -47,7 +47,9 @@ def test_refresh_saves_candidates_and_suggestions_log_shown(rec, clock):
     shown = rec.store.query("SELECT video_id, rank, features FROM rec_events WHERE event = 'shown' ORDER BY rank")
     assert [r[0] for r in shown] == [x.candidate.video_id for x in s] and shown[0][1] == 1
     f = json.loads(shown[0][2])
-    assert set(f) == {"similarity", "boost", "affinity", "duration", "rank", "discovery", "shared", "kind"}
+    assert set(f) == {"similarity", "boost", "affinity", "duration", "rank", "discovery", "shared", "kind",
+                      "ranker"}
+    assert f["ranker"] == "v1"
     assert f["similarity"] == pytest.approx(s[0].similarity) and f["rank"] == 1
 
 
@@ -239,3 +241,77 @@ def test_the_log_feeds_training_rows(rec, clock):
     got = rows(events)
     assert len(got) == len(first)  # the first list is settled; the second is still on the page
     assert [r.label for r in got].count(0) == len(first) and got[0].weight == 1.0
+
+
+def _model(w_similarity, active=True):
+    from downloader.engine.recommend.features import NAMES
+    from downloader.engine.recommend.learn import Weights
+    w = Weights(NAMES, [w_similarity] + [0.0] * 7, 0.0, [0.0] * 8, [1.0] * 8, "hand")
+    return {"active": active, "reason": "test", "weights": w.to_json(), "compare": {}, "report": {},
+            "trained_at": 0.0}
+
+
+def test_a_learned_model_ranks_the_page(rec):
+    rec.refresh()
+    v1 = [x.candidate.video_id for x in rec.suggestions()]
+    rec.store.set_setting("rec_model", _model(-5.0))  # a model that likes what v1 dislikes
+    learned = rec.suggestions()
+    assert [x.candidate.video_id for x in learned] != v1
+    assert all(0.0 <= x.score <= 1.0 for x in learned)  # v2's score is a probability
+    assert rec.ranker() == "v2"
+
+
+def test_an_inactive_model_or_the_setting_off_keeps_v1(rec, store):
+    from downloader.engine.settings import Settings
+    rec.refresh()
+    v1 = [x.candidate.video_id for x in rec.suggestions()]
+    store.set_setting("rec_model", _model(-5.0, active=False))
+    assert [x.candidate.video_id for x in rec.suggestions()] == v1 and rec.ranker() == "v1"
+    store.set_setting("rec_model", _model(-5.0))
+    settings = Settings.load(store)
+    settings.rec_learned = False
+    settings.save(store)
+    assert [x.candidate.video_id for x in rec.suggestions()] == v1 and rec.ranker() == "v1"
+
+
+def test_the_ranker_is_logged_with_each_impression(rec, clock):
+    rec.refresh()
+    rec.store.set_setting("rec_model", _model(-5.0))
+    rec.suggestions()
+    rows = rec.store.query("SELECT features FROM rec_events WHERE event = 'shown'")
+    assert {json.loads(f)["ranker"] for (f,) in rows} == {"v2"}
+
+
+def test_a_refresh_trains_and_saves_why(rec, clock):
+    rec.refresh()
+    rec.suggestions()
+    clock.now += 7 * 3600
+    rec.refresh()
+    saved = rec.store.get_setting("rec_model")
+    assert saved["active"] is False and saved["reason"].startswith("Learning: 10 of 200 rows")
+    assert rec.ranker() == "v1"
+
+
+def test_train_uses_the_chosen_trainer_and_compares_both(rec, clock, store, monkeypatch):
+    pytest.importorskip("sklearn")
+    from downloader.engine.recommend import evaluate
+    from downloader.engine.settings import Settings
+    monkeypatch.setattr(evaluate, "MIN_ROWS", 1)
+    monkeypatch.setattr(evaluate, "MIN_DOWNLOADS", 0)
+    monkeypatch.setattr(evaluate, "MIN_TEST_LISTS", 0)
+    for _ in range(3):
+        rec.refresh()
+        s = rec.suggestions()
+        rec.dismiss(s[1])
+        rec.dismiss(s[2])
+        store.add(Download(url="u", kind=Kind.VIDEO, filename="f", folder="d", title=s[0].candidate.title,
+                           channel=s[0].candidate.channel, video_id=s[0].candidate.video_id))
+        rec.suggestions()  # notices the download
+        clock.now += 7 * 3600
+    settings = Settings.load(store)
+    settings.rec_trainer = "sklearn"
+    settings.save(store)
+    rec.train()
+    saved = store.get_setting("rec_model")
+    assert json.loads(saved["weights"])["trainer"] == "sklearn"
+    assert set(saved["compare"]) == {"hand", "sklearn"}
