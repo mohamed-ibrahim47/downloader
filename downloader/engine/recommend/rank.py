@@ -27,6 +27,7 @@ class Suggestion:
     because: str | None  # title of the download it is most like
     shared: list[str]  # up to 3 words it shares with that download
     discovery: bool = False
+    learned: bool = False  # score is v2's probability, not similarity + boost
 
 
 @dataclass
@@ -91,7 +92,7 @@ def rank(profile: Profile, cands: list[Candidate], k: int = TOP_K, rng: random.R
         because, shared = _explain(profile, m, vec, vec_norm, tokens)
         s = Suggestion(c, similarity + boost, similarity, boost, because, shared)
         if scorer is not None:
-            s.score = scorer(s, affinity)
+            s.score, s.learned = scorer(s, affinity), True
         scored.append(s)
     scored.sort(key=lambda s: (-s.score, s.candidate.video_id))
 

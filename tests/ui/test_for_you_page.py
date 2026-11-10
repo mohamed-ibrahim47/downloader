@@ -234,3 +234,30 @@ def test_updated_uses_the_recommenders_clock(qtbot, rec, clock):
     clock.now += 2 * 3600 + 5
     page = _page(qtbot, rec); page.open()
     assert "Updated 2 h ago" in _texts(page)
+
+
+def test_why_says_which_ranker_and_how_learning_goes(qtbot, rec, clock):
+    rec.refresh(); page = _page(qtbot, rec); page.open()
+    clock.now += REFRESH_AFTER + 1
+    rec.refresh()  # trains on the first list
+    page.show()
+    page.findChild(QCheckBox, "why").setChecked(True)
+    info = page.findChild(QLabel, "rankerInfo")
+    assert info.isVisible() and "Hand-tuned (v1)" in info.text() and "Learning:" in info.text()
+
+
+def test_a_learned_ranker_shows_its_weights_and_honest_scores(qtbot, rec):
+    from downloader.engine.recommend.features import NAMES
+    from downloader.engine.recommend.learn import Weights
+    rec.refresh()
+    hand = Weights(NAMES, [1.5] + [0.0] * 7, -2.0, [0.0] * 8, [1.0] * 8, "hand")
+    sk = Weights(NAMES, [1.49] + [0.0] * 7, -2.0, [0.0] * 8, [1.0] * 8, "sklearn")
+    rec.store.set_setting("rec_model", {"active": True, "reason": "v2 beats v1", "weights": hand.to_json(),
+                                        "compare": {"hand": hand.to_json(), "sklearn": sk.to_json()},
+                                        "report": {}, "trained_at": 0.0})
+    page = _page(qtbot, rec); page.open(); page.show()
+    page.findChild(QCheckBox, "why").setChecked(True)
+    text = page.findChild(QLabel, "rankerInfo").text()
+    assert "Learned (v2)" in text and "similarity" in text and "1.50" in text and "1.49" in text
+    score = page.cards()[0].findChild(QLabel, "score").text()
+    assert "chance" in score and "=" not in score  # not v1's sum any more

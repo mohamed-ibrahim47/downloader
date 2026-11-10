@@ -31,6 +31,7 @@ from .sparkline import Sparkline
 from .theme import APP_ICON, PALETTES, stylesheet
 from .title_bar import TitleBar, make_grips, place_grips
 from .tray import Tray
+from .workers import run_in_pool
 
 CHIPS = (("all", "All"), ("active", "Active"), ("queued", "Queued"), ("completed", "Completed"))
 NAV = (("downloads", "list", "Downloads"), ("for_you", "spark", "For you"),
@@ -346,6 +347,7 @@ class MainWindow(QMainWindow):
 
     def apply_settings(self, settings: Settings) -> None:
         theme_changed = settings.theme != self.settings.theme
+        trainer_changed = settings.rec_trainer != self.settings.rec_trainer
         self.settings = settings
         settings.save(self.store)
         self.ctl.apply_settings(settings)
@@ -354,6 +356,8 @@ class MainWindow(QMainWindow):
         self._nav_buttons["for_you"].setVisible(settings.suggest_videos)
         if not settings.suggest_videos and self.pages.currentWidget() is self.for_you_page:
             self._go_to_downloads()  # don't leave the owner on a page that just disappeared
+        if trainer_changed:
+            run_in_pool(self.recommender.train)  # the model on show should come from the chosen trainer
         if theme_changed:
             self._apply_theme()
         else:

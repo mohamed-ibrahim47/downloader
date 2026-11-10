@@ -5,9 +5,10 @@ import dataclasses
 from typing import Callable
 
 from PySide6.QtCore import QTime, Qt
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QTimeEdit, QVBoxLayout, QWidget)
 
+from ..engine.recommend.learn import available_trainers
 from ..engine.scheduler import Schedule
 from ..engine.settings import Settings
 
@@ -60,9 +61,28 @@ class SettingsPage(QWidget):
         self._suggest = QCheckBox("Suggest videos on the For you page", objectName="suggest_videos")
         self._suggest.setChecked(settings.suggest_videos)
         self._suggest.toggled.connect(lambda on: self._set(suggest_videos=on))
+        self._learned = QCheckBox("Use the learned ranker on For you when it's ready", objectName="rec_learned")
+        self._learned.setChecked(settings.rec_learned)
+        self._learned.toggled.connect(lambda on: self._set(rec_learned=on))
         col.addWidget(self._number)
         col.addWidget(self._subs)
         col.addWidget(self._suggest)
+        col.addWidget(self._learned)
+        trainer_row = QHBoxLayout()
+        trainer_row.addWidget(QLabel("Train it with", objectName="panelLabel"))
+        self._trainer = QComboBox(objectName="rec_trainer")
+        have = available_trainers()
+        for key, text in (("hand", "Hand-written gradient descent"), ("sklearn", "scikit-learn")):
+            if key not in have:
+                text += " (install scikit-learn to use this)"
+            self._trainer.addItem(text, key)
+            self._trainer.model().item(self._trainer.count() - 1).setEnabled(key in have)
+        self._trainer.setCurrentIndex(max(0, self._trainer.findData(settings.rec_trainer if
+                                                                    settings.rec_trainer in have else "hand")))
+        self._trainer.currentIndexChanged.connect(lambda _i: self._set(rec_trainer=self._trainer.currentData()))
+        trainer_row.addWidget(self._trainer)
+        trainer_row.addStretch(1)
+        col.addLayout(trainer_row)
         col.addStretch(1)
 
     def set_settings(self, settings: Settings) -> None:

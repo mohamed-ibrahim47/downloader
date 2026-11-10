@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea,
                                QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
+from ..engine.recommend.learn import Weights
 from ..engine.recommend.rank import Suggestion
 from ..engine.recommend.service import Recommender
 from ..engine.timecode import fmt_clock
@@ -32,6 +33,38 @@ def _plain(text: str, name: str) -> QLabel:
 
 def _menu_text(text: str) -> str:
     return text.replace("&", "&&")  # a lone & would turn the next letter into a keyboard shortcut
+
+
+def _score_text(s: Suggestion) -> str:
+    if s.learned:  # v2's score is a probability; similarity and channel are only two of its inputs
+        return f"chance {s.score:.0%} (learned) · similarity {s.similarity:.2f} · channel {s.boost:.2f}"
+    return f"score {s.score:.2f} = similarity {s.similarity:.2f} + channel {s.boost:.2f}"
+
+
+TRAINER_NAMES = {"hand": "hand-written trainer", "sklearn": "scikit-learn"}
+
+
+def ranker_text(model: dict | None, ranker: str) -> str:
+    """The "Why this order?" block: which ranker is on, how learning goes, and the learned weights."""
+    lines = []
+    weights = Weights.from_json(model["weights"]) if model and model.get("weights") else None
+    if ranker == "v2" and weights:
+        lines.append(f"Ranked by: Learned (v2), {TRAINER_NAMES.get(weights.trainer, weights.trainer)}")
+    else:
+        lines.append("Ranked by: Hand-tuned (v1)")
+    if model:
+        reason = model.get("reason", "")
+        if ranker == "v1" and model.get("active"):
+            reason += ". Turned off in Settings"
+        lines.append(reason)
+    compare = {name: Weights.from_json(text) for name, text in (model or {}).get("compare", {}).items()}
+    if compare:
+        names = [n for n in ("hand", "sklearn") if n in compare]
+        lines.append("Learned weights (" + " / ".join(TRAINER_NAMES[n] for n in names) + "):")
+        first = compare[names[0]]
+        for i, feature in enumerate(first.names):
+            lines.append(f"  {feature}  " + " / ".join(f"{compare[n].w[i]:+.2f}" for n in names))
+    return "\n".join(lines)
 
 
 def _ago(seconds: float) -> str:
@@ -68,8 +101,7 @@ class SuggestionCard(QFrame):
         self.reason.setProperty("discovery", s.discovery)
         self.reason.setVisible(bool(reason))
         col.addWidget(self.reason)
-        self.score = ElidedLabel(f"score {s.score:.2f} = similarity {s.similarity:.2f} + channel {s.boost:.2f}",
-                                 objectName="score")
+        self.score = ElidedLabel(_score_text(s), objectName="score")
         self.score.setVisible(show_score)
         col.addWidget(self.score)
 
@@ -129,10 +161,13 @@ class ForYouPage(QWidget):
 
         self._offline = _plain("", "offline")
         self._offline.hide()
+        self._ranker = _plain("", "rankerInfo")
+        self._ranker.hide()
         self._words = _plain("", "profileWords")
         self._words.hide()
         self._message = _plain("", "muted")
         col.addWidget(self._offline)
+        col.addWidget(self._ranker)
         col.addWidget(self._words)
         col.addWidget(self._message)
 
@@ -244,9 +279,14 @@ class ForYouPage(QWidget):
         self._updated.setText(_ago(age) if age is not None else "")
         if why:
             self._set_words(view.words)
+            self._set_ranker()
         self._words.setVisible(why and bool(self._shown))
+        self._ranker.setVisible(why and bool(self._shown))
         self._fill_blocked()
         self._set_state("list" if self._shown else "empty")
+
+    def _set_ranker(self) -> None:
+        self._ranker.setText(ranker_text(self._rec.model(), self._rec.ranker()))
 
     def _set_words(self, words: list[tuple[str, float]]) -> None:
         self._words.setText("Your words: " + " · ".join(f"{w} {v:.2f}" for w, v in words))
@@ -269,7 +309,9 @@ class ForYouPage(QWidget):
     def _show_why(self, on: bool) -> None:
         if on and self._shown:
             self._set_words(self._rec.words(WORDS))  # worked out only when asked for
+            self._set_ranker()
         self._words.setVisible(on and bool(self._shown))
+        self._ranker.setVisible(on and bool(self._shown))
         for card in self._cards:
             card.score.setVisible(on)
 

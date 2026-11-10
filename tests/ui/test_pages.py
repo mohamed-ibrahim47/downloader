@@ -180,3 +180,35 @@ def test_rail_opens_pages(win, qtbot):
     assert win.pages.currentWidget() is win.settings_page
     win._nav_buttons["scheduler"].click()
     assert win.pages.currentWidget() is win.scheduler_page
+
+
+def test_settings_page_learned_ranker_and_trainer(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QComboBox
+    from downloader.engine.recommend import learn
+    monkeypatch.setattr(learn, "_sklearn", lambda: object())  # pretend it's installed
+    got = []
+    page = SettingsPage(Settings(), got.append)
+    qtbot.addWidget(page)
+    page.findChild(QCheckBox, "rec_learned").setChecked(False)
+    assert got[-1].rec_learned is False
+    combo = page.findChild(QComboBox, "rec_trainer")
+    combo.setCurrentIndex(combo.findData("sklearn"))
+    assert got[-1].rec_trainer == "sklearn"
+
+
+def test_trainer_choice_without_sklearn_is_greyed_out(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QComboBox
+    from downloader.engine.recommend import learn
+    monkeypatch.setattr(learn, "_sklearn", lambda: None)
+    page = SettingsPage(Settings(), lambda s: None)
+    qtbot.addWidget(page)
+    combo = page.findChild(QComboBox, "rec_trainer")
+    item = combo.model().item(combo.findData("sklearn"))
+    assert not item.isEnabled() and "install scikit-learn" in combo.itemText(combo.findData("sklearn"))
+
+
+def test_changing_the_trainer_retrains_in_the_background(win, qtbot, monkeypatch):
+    trained = []
+    monkeypatch.setattr(win.recommender, "train", lambda: trained.append(True))
+    win.apply_settings(dataclasses.replace(win.settings, rec_trainer="sklearn"))
+    qtbot.waitUntil(lambda: bool(trained), timeout=3000)
