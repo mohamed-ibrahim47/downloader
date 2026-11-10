@@ -224,3 +224,18 @@ def test_an_old_database_gets_the_new_columns(tmp_path):
     assert rec.log.candidates()[0].kind is None
     assert "refresh" in {r[1] for r in s.query("PRAGMA table_info(rec_events)")}
     s.close()
+
+
+def test_the_log_feeds_training_rows(rec, clock):
+    from downloader.engine.recommend.dataset import rows
+    rec.refresh()
+    first = rec.suggestions()
+    rec.dismiss(first[0])
+    clock.now += 7 * 3600
+    rec.refresh()
+    rec.suggestions()
+    events = rec.log.events()
+    assert [e[2] for e in events][:len(first)] == ["shown"] * len(first)
+    got = rows(events)
+    assert len(got) == len(first)  # the first list is settled; the second is still on the page
+    assert [r.label for r in got].count(0) == len(first) and got[0].weight == 1.0

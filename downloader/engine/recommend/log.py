@@ -75,6 +75,11 @@ class RecLog:
                              json.dumps(features) if features is not None else None, now, refresh))
             for event, c, score, rank, features in events])
 
+    def events(self) -> list[tuple]:
+        """What training needs, in order: (id, video_id, event, features, at, refresh)."""
+        return self.store.query("SELECT id, video_id, event, features, at, refresh FROM rec_events "
+                                "WHERE event IN ('shown', 'downloaded', 'dismissed') ORDER BY id")
+
     def dismissed(self) -> list[Dismissed]:
         rows = self.store.query("SELECT video_id, title, channel FROM rec_events WHERE event = 'dismissed' "
                                 "GROUP BY video_id ORDER BY MIN(id)")
