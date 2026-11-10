@@ -19,6 +19,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-qt", "pyinstaller"]
+# Optional: the scikit-learn trainer for For you (design v2, C4). Never bundled in the exe.
+ml = ["scikit-learn"]
 
 [project.scripts]
 downloader = "downloader.__main__:main"

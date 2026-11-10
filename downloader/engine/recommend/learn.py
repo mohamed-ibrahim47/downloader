@@ -15,6 +15,7 @@ Gradient descent repeats `w -= rate · ∂L/∂w` until the loss stops falling.
 """
 from __future__ import annotations
 
+import importlib
 import json
 import math
 from dataclasses import asdict, dataclass
@@ -107,3 +108,44 @@ class HandTrainer:
             w = [wj - self.rate * g for wj, g in zip(w, gw)]
             b -= self.rate * gb
         return Weights(list(names), w, b, means, stds, self.name)
+
+
+class SklearnTrainer:
+    """The same model, fitted by scikit-learn, the standard ML library: an answer key for HandTrainer.
+
+    scikit-learn minimises  ½·‖w‖² + C · Σ sᵢ · lossᵢ.  Ours divided by λ is the same with C = 1 / (λ·n),
+    and the loss has a single minimum, so both trainers should land on the same weights.
+    """
+    name = "sklearn"
+
+    def __init__(self, lam: float = LAMBDA):
+        self.lam = lam
+
+    def fit(self, names: list[str], X: list[list[float]], y: list[int], s: list[float]) -> Weights:
+        sk = _sklearn()
+        Z, means, stds = standardise(X)  # standardised exactly as HandTrainer does
+        model = sk.LogisticRegression(C=1.0 / (self.lam * len(Z)), solver="lbfgs", max_iter=10_000, tol=1e-10)
+        model.fit(Z, y, sample_weight=s)
+        return Weights(list(names), [float(v) for v in model.coef_[0]], float(model.intercept_[0]), means, stds,
+                       self.name)
+
+
+def _sklearn():
+    """scikit-learn's linear models, or None when it isn't installed (as in the exe).
+
+    Imported by name at run time, never with an `import` line: PyInstaller bundles every package an
+    `import` line names, and scikit-learn plus numpy and scipy would add a lot to the exe.
+    """
+    try:
+        return importlib.import_module("sklearn.linear_model")
+    except Exception:  # missing, or a broken install: either way, not offered
+        return None
+
+
+def available_trainers() -> list[str]:
+    return ["hand", "sklearn"] if _sklearn() is not None else ["hand"]
+
+
+def trainer(name: str):
+    """The trainer the owner chose, or the hand-written one if that choice isn't installed."""
+    return SklearnTrainer() if name == "sklearn" and _sklearn() is not None else HandTrainer()

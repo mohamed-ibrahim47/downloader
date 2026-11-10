@@ -16,6 +16,7 @@ try {
         --add-data "$assets;downloader\ui\assets" `
         --collect-binaries imageio_ffmpeg `
         --collect-submodules yt_dlp `
+        --exclude-module sklearn --exclude-module numpy --exclude-module scipy `
         --distpath (Join-Path $out "dist") `
         --workpath (Join-Path $out "work") `
         --specpath (Join-Path $out "work") `

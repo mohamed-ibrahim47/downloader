@@ -78,3 +78,23 @@ def test_training_is_deterministic():
     a = HandTrainer().fit(["a", "b"], X, y, [1.0] * 200)
     b = HandTrainer().fit(["a", "b"], X, y, [1.0] * 200)
     assert a == b and not math.isnan(a.b)
+
+
+def test_hand_is_always_offered_and_sklearn_only_when_it_imports(monkeypatch):
+    from downloader.engine.recommend import learn
+    assert "hand" in learn.available_trainers()
+    monkeypatch.setattr(learn, "_sklearn", lambda: None)
+    assert learn.available_trainers() == ["hand"]
+    assert learn.trainer("sklearn").name == "hand"  # asked for but missing: fall back, don't crash
+
+
+def test_both_trainers_find_the_same_weights():
+    # Same objective, and it has one minimum (it's convex), so both must land on the same answer.
+    pytest.importorskip("sklearn")
+    from downloader.engine.recommend.learn import SklearnTrainer
+    X, y = _synthetic(n=600)
+    s = [1.0 if yi else 0.3 for yi in y]
+    hand = HandTrainer(epochs=5000, tolerance=1e-12).fit(["a", "b"], X, y, s)
+    sk = SklearnTrainer().fit(["a", "b"], X, y, s)
+    assert sk.trainer == "sklearn"
+    assert sk.w == pytest.approx(hand.w, abs=0.01) and sk.b == pytest.approx(hand.b, abs=0.01)
