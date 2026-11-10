@@ -37,3 +37,8 @@ def from_logged(f: dict) -> list[float]:
 def from_suggestion(s: Suggestion, affinity: float) -> list[float]:
     """A candidate about to be ranked → the model's inputs, at rank 1 and not the discovery pick."""
     return _vector(s.similarity, affinity, len(s.shared), s.candidate.duration, s.candidate.kind, 1, False)
+
+
+def at_top(x: list[float]) -> list[float]:
+    """A logged row's inputs as ranking sees them: at rank 1 (log 1 = 0) and not the discovery pick."""
+    return x[:6] + [0.0, 0.0]

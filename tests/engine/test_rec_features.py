@@ -42,3 +42,8 @@ def test_a_suggestion_is_scored_at_rank_one_and_not_as_discovery():
     s = Suggestion(c, 0.5, 0.4, 0.1, None, ["a", "b"], discovery=True)
     x = from_suggestion(s, affinity=0.5)
     assert x == pytest.approx([0.4, 0.5, 2, math.log(11), 0, 1, 0, 0])
+
+
+def test_at_top_matches_how_a_suggestion_is_scored():
+    from downloader.engine.recommend.features import at_top
+    assert at_top(from_logged(_logged(rank=7, discovery=True)))[6:] == [0, 0]
