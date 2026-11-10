@@ -1,7 +1,7 @@
 import pytest
 
 from downloader.engine.errors import DownloadError
-from downloader.engine.recommend.candidates import Candidate, fetch, keep, queries
+from downloader.engine.recommend.candidates import Candidate, fetch, keep, plan, queries
 from downloader.engine.recommend.profile import Profile, ProfileDoc
 from downloader.engine.youtube import SearchHit
 
@@ -68,3 +68,21 @@ def test_keep_filters_and_dedupes():
     cands = [c("ok"), c("ok"), c("have"), c("nope"), c("blocked", ch="Bad"), c("short", dur=59),
              c("live", dur=None), c("edge", dur=60)]
     assert [x.video_id for x in keep(cands, {"have"}, {"nope"}, {"Bad"})] == ["ok", "edge"]
+
+
+def test_plan_names_the_kind_of_each_search():
+    # The learning log records how a video was found, so v2 can learn which kind of search suits the owner.
+    old = [ProfileDoc(str(i), t, [], 0.7) for i, t in enumerate(["Blank Space", "Style Era", "Shake Cover"])]
+    new = ProfileDoc("9", "Interstellar Official Trailer Christopher Nolan Movie Scene", [], 1.0)
+    p = Profile(docs=[new, *old], channels={"TS": 1.0, "Other": 0.5})
+    kinds = dict(plan(p))
+    assert [q for q, _ in plan(p)] == queries(p)
+    assert kinds["TS"] == kinds["Other"] == "channel" and kinds["interstellar trailer"] == "newest"
+    assert sorted(kinds.values()).count("words") == 1
+
+
+def test_fetch_tags_each_candidate_with_its_search_kind():
+    hit = SearchHit("v1", "u", "t", "c", 200)
+    got = fetch([("TS", "channel"), ("blank space", "words")], lambda q, limit: [hit])
+    assert [c.kind for c in got] == ["channel", "words"]
+    assert fetch(["plain"], lambda q, limit: [hit])[0].kind is None  # a bare query has no kind

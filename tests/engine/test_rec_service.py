@@ -47,7 +47,7 @@ def test_refresh_saves_candidates_and_suggestions_log_shown(rec, clock):
     shown = rec.store.query("SELECT video_id, rank, features FROM rec_events WHERE event = 'shown' ORDER BY rank")
     assert [r[0] for r in shown] == [x.candidate.video_id for x in s] and shown[0][1] == 1
     f = json.loads(shown[0][2])
-    assert set(f) == {"similarity", "boost", "affinity", "duration", "rank", "discovery", "shared"}
+    assert set(f) == {"similarity", "boost", "affinity", "duration", "rank", "discovery", "shared", "kind"}
     assert f["similarity"] == pytest.approx(s[0].similarity) and f["rank"] == 1
 
 
@@ -192,3 +192,35 @@ def test_a_refresh_that_finds_nothing_keeps_the_list(rec, store, clock):
 def test_events_are_indexed(rec):
     names = [r[0] for r in rec.store.query("SELECT name FROM sqlite_master WHERE type = 'index'")]
     assert "rec_events_event" in names
+
+
+def test_shown_rows_carry_their_refresh_and_search_kind(rec, clock):
+    # v2 groups impressions into the list they were shown in, and learns which kind of search works.
+    rec.refresh()
+    first = clock.now
+    rec.suggestions()
+    clock.now += 7 * 3600
+    rec.refresh()
+    rec.suggestions()
+    rows = rec.store.query("SELECT refresh, features FROM rec_events WHERE event = 'shown'")
+    assert {r[0] for r in rows} == {first, clock.now}
+    assert {json.loads(f)["kind"] for _, f in rows} <= {"channel", "newest", "words"}
+
+
+def test_an_old_database_gets_the_new_columns(tmp_path):
+    import sqlite3
+    path = tmp_path / "db.sqlite"
+    Store(path).close()
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE rec_candidates (video_id TEXT PRIMARY KEY, url TEXT, title TEXT, channel TEXT, "
+               "duration INTEGER, query TEXT, found_at REAL)")
+    db.execute("CREATE TABLE rec_events (id INTEGER PRIMARY KEY, video_id TEXT, event TEXT, title TEXT, "
+               "channel TEXT, score REAL, rank INTEGER, features TEXT, at REAL)")
+    db.execute("INSERT INTO rec_candidates VALUES ('v', 'u', 't', 'c', 200, 'q', 1.0)")
+    db.commit()
+    db.close()
+    s = Store(path)
+    rec = Recommender(s, search=_fake_search)
+    assert rec.log.candidates()[0].kind is None
+    assert "refresh" in {r[1] for r in s.query("PRAGMA table_info(rec_events)")}
+    s.close()

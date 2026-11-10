@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from .. import youtube
 from ..store import Store
-from .candidates import Candidate, fetch, keep, queries
+from .candidates import Candidate, fetch, keep, plan
 from .log import RecLog
 from .profile import Profile, build_profile
 from .rank import TOP_K, Suggestion, build_model, profile_words, rank
@@ -69,7 +69,7 @@ class Recommender:
             profile = self.profile()
             if not profile.ready:
                 return  # nothing would be shown, so don't search
-            cands = fetch(queries(profile, self.log.blocked()), self._search)  # raises when offline
+            cands = fetch(plan(profile, self.log.blocked()), self._search)  # raises when offline
             if cands:
                 self.log.save_candidates(cands, self._clock())
             else:
@@ -107,7 +107,7 @@ class Recommender:
         new = [(i, s) for i, s in enumerate(picks, start=1) if s.candidate.video_id not in self._logged]
         if new:
             self.log.record_many([("shown", s.candidate, s.score, i, _features(s, profile, i)) for i, s in new],
-                                 self._clock())
+                                 self._clock(), refresh=self._generation)
             self._logged.update(s.candidate.video_id for _, s in new)
 
     def suggestions(self, k: int = TOP_K) -> list[Suggestion]:
@@ -133,7 +133,8 @@ def _features(s: Suggestion, profile: Profile, rank_: int) -> dict:
     """One training row for v2 (a learned ranker): the inputs v1 used, and where it put the video."""
     return {"similarity": s.similarity, "boost": s.boost,
             "affinity": profile.channels.get(s.candidate.channel, 0.0) if s.candidate.channel else 0.0,
-            "duration": s.candidate.duration, "rank": rank_, "discovery": s.discovery, "shared": len(s.shared)}
+            "duration": s.candidate.duration, "rank": rank_, "discovery": s.discovery, "shared": len(s.shared),
+            "kind": s.candidate.kind}
 
 
 __all__ = ["REFRESH_AFTER", "Recommender", "View", "Candidate"]

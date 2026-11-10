@@ -23,6 +23,7 @@ class Candidate:
     channel: str | None
     duration: int | None
     query: str  # the search that found it, kept for the learning log
+    kind: str | None = None  # what kind of search: "channel", "newest" or "words" (None: from before 1.2.1)
 
 
 def _pair(words: list[str], weight: float, idf: dict[str, float]) -> tuple[str, float] | None:
@@ -37,45 +38,58 @@ def _pair(words: list[str], weight: float, idf: dict[str, float]) -> tuple[str, 
     return " ".join(best), scores[best[0]] + scores[best[1]]
 
 
-def queries(profile: Profile, blocked: set[str] | frozenset[str] = frozenset()) -> list[str]:
+def plan(profile: Profile, blocked: set[str] | frozenset[str] = frozenset()) -> list[tuple[str, str]]:
     """Up to 2 channel names (never a blocked one), the newest download, then word pairs (spec B5).
 
     The newest download always gets a search of its own. Without it, every search came from the old
     favourites, so a new interest never reached YouTube (seen in the month-long simulation).
     Pairs come from the title only: tags are often SEO filler, and these words are sent to YouTube.
+    Each search comes with its kind ("channel", "newest" or "words"), which the learning log keeps.
     """
     liked_channels = [name for name in profile.channels if name not in blocked]
     channels = sorted(liked_channels, key=lambda name: -profile.channels[name])[:CHANNEL_QUERIES]
     liked = [(tokenize(d.title), d.weight) for d in profile.docs if d.weight > 0]
     idf = fit_idf([words for words, _ in liked])
-    out = list(channels)
+    out = [(name, "channel") for name in channels]
+    texts = set(channels)
     newest = max(liked, key=lambda wd: wd[1], default=None)  # weight falls with age: the highest is the newest
     if newest and newest[0]:
         fresh = _pair(*newest, idf)
         text = fresh[0] if fresh else newest[0][0]  # a one-word title is searched as that word
-        if text not in out:
-            out.append(text)
+        if text not in texts:
+            out.append((text, "newest"))
+            texts.add(text)
     pairs = [p for p in (_pair(words, weight, idf) for words, weight in liked) if p]
     pairs.sort(key=lambda p: -p[1])
     for text, _score in pairs:
         if len(out) >= QUERIES_PER_REFRESH:
             break
-        if text not in out:
-            out.append(text)
+        if text not in texts:
+            out.append((text, "words"))
+            texts.add(text)
     return out
 
 
-def fetch(queries: list[str], search=youtube.search) -> list[Candidate]:
-    """Run each query in turn. A failing query is skipped; if all of them fail, we're offline."""
+def queries(profile: Profile, blocked: set[str] | frozenset[str] = frozenset()) -> list[str]:
+    """The search texts of `plan`, in order."""
+    return [text for text, _kind in plan(profile, blocked)]
+
+
+def fetch(queries: list[str] | list[tuple[str, str]], search=youtube.search) -> list[Candidate]:
+    """Run each query in turn. A failing query is skipped; if all of them fail, we're offline.
+
+    A query is a text, or a (text, kind) pair from `plan`; the kind is copied onto each candidate.
+    """
     found: list[Candidate] = []
     failed = 0
-    for q in queries:
+    for item in queries:
+        q, kind = item if isinstance(item, tuple) else (item, None)
         try:
             hits = search(q, RESULTS_PER_QUERY)
         except Exception:
             failed += 1
             continue
-        found += [Candidate(h.video_id, h.url, h.title, h.channel, h.duration, q) for h in hits]
+        found += [Candidate(h.video_id, h.url, h.title, h.channel, h.duration, q, kind) for h in hits]
     if queries and failed == len(queries):
         raise DownloadError("Couldn't reach YouTube.")
     return found
