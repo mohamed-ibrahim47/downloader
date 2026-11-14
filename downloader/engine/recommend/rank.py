@@ -28,6 +28,7 @@ class Suggestion:
     shared: list[str]  # up to 3 words it shares with that download
     discovery: bool = False
     learned: bool = False  # score is v2's probability, not similarity + boost
+    meaning: float = 0.0  # v4: closeness in meaning to the downloads (meaning.MeaningIndex), 0 without it
 
 
 @dataclass
@@ -74,12 +75,15 @@ def _explain(profile: Profile, m: Model, cand_vec: dict, cand_norm: float, cand_
 
 
 def rank(profile: Profile, cands: list[Candidate], k: int = TOP_K, rng: random.Random | None = None,
-         discovery_id: str | None = None, model: Model | None = None, scorer=None) -> list[Suggestion]:
+         discovery_id: str | None = None, model: Model | None = None, scorer=None,
+         meaning=None) -> list[Suggestion]:
     """`discovery_id`: keep this video in the discovery slot while it is still in range, so the slot
     doesn't change under the owner after a Dismiss.
 
     `scorer(suggestion, affinity) -> float`: a learned score in place of v1's similarity + boost. Everything
-    after the score (variety, discovery) stays the same."""
+    after the score (variety, discovery) stays the same.
+
+    `meaning`: a `meaning.MeaningIndex`; each suggestion's `meaning` is set from it before `scorer` runs."""
     rng = rng or random.Random()
     m = model or build_model(profile, cands)
     scored = []
@@ -91,6 +95,8 @@ def rank(profile: Profile, cands: list[Candidate], k: int = TOP_K, rng: random.R
         boost = CHANNEL_BOOST * affinity
         because, shared = _explain(profile, m, vec, vec_norm, tokens)
         s = Suggestion(c, similarity + boost, similarity, boost, because, shared)
+        if meaning is not None:
+            s.meaning = meaning.score(tokens)
         if scorer is not None:
             s.score, s.learned = scorer(s, affinity), True
         scored.append(s)

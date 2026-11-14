@@ -97,3 +97,19 @@ def test_profile_words_skip_channels_highest_first():
     assert words[0][0] == "piano" and words[0][1] == pytest.approx(0.693, abs=1e-3)
     assert not any(w.startswith("ch:") for w, _ in words)
     assert [v for _, v in words] == sorted((v for _, v in words), reverse=True)
+
+
+def test_rank_sets_meaning_on_suggestions():
+    from downloader.engine.recommend.embed import Vectors
+    from downloader.engine.recommend.meaning import MeaningIndex
+    from downloader.engine.recommend.rank import build_model
+    p = _profile(("Blank Space", "TS"), ("Style", "TS"), ("Shake It Off", "TS"))
+    cands = [_c("p", "Blank Space Piano Cover", "Pianist"), _c("e", "Python Tutorial", "Code")]
+    vec = Vectors(["blank", "space", "piano", "python"], [[1, 0], [1, 0.2], [0.9, 0.1], [0, 1]], [1] * 4)
+    m = build_model(p, cands)
+    idx = MeaningIndex(p, vec, m.idf)
+    s = rank(p, cands, model=m, meaning=idx)
+    by_id = {x.candidate.video_id: x for x in s}
+    assert by_id["p"].meaning == pytest.approx(idx.score(m.cand_tokens[0])) and by_id["p"].meaning > 0
+    assert by_id["e"].meaning == pytest.approx(idx.score(m.cand_tokens[1]))
+    assert [x.candidate.video_id for x in s] == ["p", "e"]  # no scorer: the order is v1's
