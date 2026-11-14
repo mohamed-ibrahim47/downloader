@@ -26,6 +26,7 @@ class ProfileDoc:
     title: str
     tokens: list[str]
     weight: float
+    added_at: float = 0.0  # when it was downloaded (0 for dismissals): "newest" goes by this
 
 
 @dataclass
@@ -66,7 +67,7 @@ def _file_doc(d: Download, now: float) -> ProfileDoc | None:
     if not words:
         return None
     title = " ".join(words)
-    return ProfileDoc(None, title, tokenize(title), FILE_WEIGHT * _recency(d.added_at, now))
+    return ProfileDoc(None, title, tokenize(title), FILE_WEIGHT * _recency(d.added_at, now), d.added_at)
 
 
 def build_profile(downloads: list[Download], dismissed: list[Dismissed], now: float,
@@ -84,7 +85,8 @@ def build_profile(downloads: list[Download], dismissed: list[Dismissed], now: fl
             continue
         text = f"{d.title} {d.playlist_title}" if d.playlist_title else d.title
         weight = _recency(d.added_at, now)
-        docs.append(ProfileDoc(d.video_id, d.title, tokenize(text, _tags(d.tags), d.channel), weight))
+        docs.append(ProfileDoc(d.video_id, d.title, tokenize(text, _tags(d.tags), d.channel), weight,
+                               d.added_at))
         if d.channel:
             totals[d.channel] = totals.get(d.channel, 0.0) + weight
     for x in dismissed:

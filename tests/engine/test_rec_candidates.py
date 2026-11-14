@@ -97,3 +97,14 @@ def test_newest_file_download_searches_its_words():
     f = Download(url="u", kind=Kind.FILE, filename="Blender_3D_Modeling-4.2-x64.msi", folder="d", added_at=now)
     qs = plan(build_profile(old + [f], [], now))
     assert ("modeling" in qs[0][0] or "blender" in qs[0][0]) and qs[0][1] == "newest"
+
+
+def test_newest_is_by_date_so_a_fresh_file_beats_a_day_old_video():
+    from downloader.engine.models import Download, Kind
+    from downloader.engine.recommend.profile import build_profile
+    now = 1_800_000_000.0
+    vids = [Download(url="u", kind=Kind.VIDEO, filename="f", folder="d", title=t, added_at=now - 86400)
+            for t in ("piano cover song", "guitar chords lesson")]
+    f = Download(url="u", kind=Kind.FILE, filename="Blender_3D_Modeling-4.2-x64.msi", folder="d", added_at=now)
+    newest = [q for q, kind in plan(build_profile(vids + [f], [], now)) if kind == "newest"]
+    assert newest == ["blender modeling"]

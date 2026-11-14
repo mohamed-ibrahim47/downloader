@@ -48,11 +48,15 @@ def plan(profile: Profile, blocked: set[str] | frozenset[str] = frozenset()) -> 
     """
     liked_channels = [name for name in profile.channels if name not in blocked]
     channels = sorted(liked_channels, key=lambda name: -profile.channels[name])[:CHANNEL_QUERIES]
-    liked = [(tokenize(d.title), d.weight) for d in profile.docs if d.weight > 0]
+    liked_docs = [d for d in profile.docs if d.weight > 0]
+    liked = [(tokenize(d.title), d.weight) for d in liked_docs]
     idf = fit_idf([words for words, _ in liked])
     out = [(name, "channel") for name in channels]
     texts = set(channels)
-    newest = max(liked, key=lambda wd: wd[1], default=None)  # weight falls with age: the highest is the newest
+    # By date, not weight: a file counts half (FILE_WEIGHT) but a program fetched today is still the newest.
+    # Without dates (old tests, hand-built profiles) the highest weight is the newest.
+    order = max(range(len(liked)), key=lambda i: (liked_docs[i].added_at, liked[i][1]), default=None)
+    newest = liked[order] if order is not None else None
     if newest and newest[0]:
         fresh = _pair(*newest, idf)
         text = fresh[0] if fresh else newest[0][0]  # a one-word title is searched as that word
