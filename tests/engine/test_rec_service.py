@@ -368,7 +368,7 @@ def test_no_starter_means_v1(rec, monkeypatch):
 
 def test_train_saves_the_net_when_v3_wins(rec, clock, store, monkeypatch):
     from downloader.engine.recommend import evaluate
-    monkeypatch.setattr(evaluate, "choose", lambda rep: ("v3", "v3 beats v2 and v1"))
+    monkeypatch.setattr(evaluate, "choose", lambda rep, *a: ("v3", "v3 beats v2 and v1"))
     for _ in range(3):
         rec.refresh()
         s = rec.suggestions()
@@ -423,3 +423,138 @@ def test_events_carry_the_title(rec):
     s = rec.suggestions()
     e = rec.log.events()[0]
     assert len(e) == 7 and e[6] == s[0].candidate.title
+
+
+# ---- v4: vectors, retraining, the v4 ranker, the banner (design v4, E4/E7/E8) ----------------------
+
+from downloader.engine.recommend import embed, starter_vectors  # noqa: E402
+from downloader.engine.recommend.embed import Vectors  # noqa: E402
+
+STARTER = Vectors(["blank", "space", "style", "shake", "song", "piano"],
+                  [[1, 0, 0], [0.9, 0.1, 0], [0.8, 0.2, 0], [0.7, 0.3, 0], [0.5, 0.5, 0], [0, 0, 1]], [9] * 6)
+
+
+@pytest.fixture
+def with_starter(monkeypatch):
+    monkeypatch.setattr(starter_vectors, "vectors", lambda: STARTER)
+    monkeypatch.setattr(starter_vectors, "DEFAULT_ON", True)
+    monkeypatch.setattr(starter_vectors, "EXAMPLE", ("piano", "acoustic"))
+
+
+def _add_titles(store, n, start=0):
+    for i in range(start, start + n):
+        store.add(Download(url="u", kind=Kind.VIDEO, filename="f", folder="d", title=f"song number{i} piano"))
+
+
+def _set(store, **kw):
+    from downloader.engine.settings import Settings
+    s = Settings.load(store)
+    for k, v in kw.items():
+        setattr(s, k, v)
+    s.save(store)
+
+
+def test_fresh_db_uses_starter_vectors(rec, with_starter):
+    assert rec.vectors() is STARTER
+    assert rec.vectors_meta()["source"] == "starter"
+
+
+def test_fresh_db_without_starter_has_no_vectors(rec):
+    assert rec.vectors() is None and rec.ranker() == "v1"
+
+
+def test_retrain_waits_for_300_new_titles(rec, store, with_starter):
+    _add_titles(store, 296)  # + the fixture's 3 = 299 titles
+    assert rec.retrain_vectors() is False
+    _add_titles(store, 1, start=296)
+    assert rec.retrain_vectors() is True
+    meta = rec.vectors_meta()
+    assert meta["source"] == "own" and meta["titles"] == 300
+    assert rec.retrain_vectors() is False  # nothing new since
+
+
+def test_retrain_uses_only_user_titles_and_keeps_starter_words(rec, store, with_starter):
+    _add_titles(store, 300)
+    assert rec.retrain_vectors()
+    v = rec.log.load_vectors()
+    assert set(STARTER.words) <= set(v.words) and "number5" not in v.words  # seen once: below USER_MIN_COUNT
+    assert rec.vectors().words == v.words
+
+
+def test_retrain_failure_keeps_old_vectors(rec, store, with_starter, monkeypatch):
+    _add_titles(store, 300)
+
+    def boom(*a, **k):
+        raise RuntimeError("bug")
+    monkeypatch.setattr(embed, "train", boom)
+    assert rec.retrain_vectors() is False
+    assert rec.log.load_vectors() is None and rec.vectors() is STARTER
+    rec.refresh()
+    assert rec.suggestions()
+
+
+def test_retrains_never_overlap(rec, store, with_starter):
+    _add_titles(store, 300)
+    with rec._retraining:
+        assert rec.retrain_vectors() is False
+
+
+def test_v4_ranks_when_default_on(rec, with_starter):
+    from downloader.engine.recommend.meaning import v4_score
+    rec.refresh()
+    assert rec.ranker() == "v4"
+    s = rec.suggestions(20)
+    assert any(x.meaning > 0 for x in s)
+    plain = [x for x in s if not x.discovery]
+    scores = [v4_score(x.similarity, x.meaning, x.boost / 0.15, starter_vectors.MEANING_MIX) for x in plain]
+    assert scores == sorted(scores, reverse=True) or len({x.candidate.channel for x in plain}) > 1
+    assert all(x.score == pytest.approx(sc) for x, sc in zip(plain, scores))
+
+
+def test_meaning_off_means_v1_base_and_zero_meaning(rec, store, with_starter):
+    _set(store, rec_meaning=False)
+    rec.refresh()
+    assert rec.ranker() == "v1"
+    rec.suggestions()
+    logged = [json.loads(r[0])["meaning"] for r in store.query("SELECT features FROM rec_events WHERE event='shown'")]
+    assert logged and all(m == 0 for m in logged)
+    assert not rec.uses_meaning()
+
+
+def test_learned_off_still_matches_by_meaning(rec, store, with_starter):
+    _set(store, rec_learned=False)
+    rec.refresh()
+    assert rec.ranker() == "v4"
+
+
+def test_training_recomputes_meaning_for_old_rows(rec, with_starter, monkeypatch):
+    from downloader.engine.recommend import service
+    seen = {}
+    real = service.training_rows
+
+    def spy(events, **kw):
+        seen.update(kw)
+        return real(events, **kw)
+    monkeypatch.setattr(service, "training_rows", spy)
+    rec.refresh()
+    rec.suggestions()
+    rec.train()
+    assert callable(seen.get("meaning")) and seen["meaning"]("blank space piano", rec._clock() + 1) > 0  # downloads before it count
+
+
+def test_banner_due_once(rec, with_starter):
+    rec.refresh()
+    assert rec.banner_due() and rec.example() == ("piano", "acoustic")
+    rec.banner_done()
+    assert not rec.banner_due()
+
+
+def test_no_banner_without_meaning(rec):
+    rec.refresh()
+    assert not rec.banner_due()
+
+
+def test_nearest_words_for_profile(rec, with_starter):
+    rec.refresh()
+    got = dict(rec.nearest_words(5, 2))
+    assert got["blank"] == ["space", "style"]

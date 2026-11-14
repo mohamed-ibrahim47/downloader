@@ -9,6 +9,7 @@ import json
 
 from ..store import Store
 from .candidates import Candidate
+from .embed import Vectors
 from .profile import Dismissed
 
 _LAST_REFRESH = "rec_last_refresh"  # a settings key: a refresh that found nothing still counts
@@ -19,6 +20,8 @@ _TABLES = (
     "CREATE TABLE IF NOT EXISTS rec_events (id INTEGER PRIMARY KEY, video_id TEXT, event TEXT, title TEXT, "
     "channel TEXT, score REAL, rank INTEGER, features TEXT, at REAL, refresh REAL)",
     "CREATE TABLE IF NOT EXISTS rec_blocked_channels (channel TEXT PRIMARY KEY, at REAL)",
+    # 1.5.0: the owner's own word vectors (design v4, E4): 32 float32s per word.
+    "CREATE TABLE IF NOT EXISTS rec_vectors (word TEXT PRIMARY KEY, vec BLOB, count INTEGER)",
     # mark_downloaded and dismissed() look events up by type and video on every render.
     "CREATE INDEX IF NOT EXISTS rec_events_event ON rec_events (event, video_id)",
 )
@@ -79,6 +82,23 @@ class RecLog:
         """What training needs, in order: (id, video_id, event, features, at, refresh, title)."""
         return self.store.query("SELECT id, video_id, event, features, at, refresh, title FROM rec_events "
                                 "WHERE event IN ('shown', 'downloaded', 'dismissed') ORDER BY id")
+
+    def titles(self) -> list[str]:
+        """Every distinct title the log has seen (shown, downloaded, dismissed)."""
+        return [r[0] for r in self.store.query("SELECT DISTINCT title FROM rec_events WHERE title IS NOT NULL "
+                                               "AND title != '' ORDER BY title")]
+
+    # ---- the owner's word vectors ------------------------------------------------
+
+    def save_vectors(self, v: Vectors) -> None:
+        """Replace them in one transaction: a crash halfway keeps the old ones whole."""
+        self.store.execute_many([("DELETE FROM rec_vectors", ()),
+                                 *[("INSERT INTO rec_vectors (word, vec, count) VALUES (?, ?, ?)", row)
+                                   for row in v.to_rows()]])
+
+    def load_vectors(self) -> Vectors | None:
+        rows = self.store.query("SELECT word, vec, count FROM rec_vectors ORDER BY rowid")
+        return Vectors.from_rows(rows, len(rows[0][1]) // 4) if rows else None
 
     def dismissed(self) -> list[Dismissed]:
         rows = self.store.query("SELECT video_id, title, channel FROM rec_events WHERE event = 'dismissed' "
