@@ -119,6 +119,8 @@ QFrame#suggestionCard QLabel#meta, QFrame#suggestionCard QLabel#reason {{ color:
 QFrame#suggestionCard QLabel#reason[discovery="true"] {{ color: {c['accent']}; }}
 QLabel#score, QLabel#profileWords {{ color: {c['muted']}; font-family: {MONO}; font-size: 12px; }}
 QLabel#offline {{ color: {c['error']}; font-size: 12px; }}
+QFrame#meaningBanner {{ background: {c['surface']}; border: 1px solid {c['accent']}; border-radius: 10px; }}
+QLabel#bannerText {{ color: {c['text']}; background: transparent; border: none; }}
 QFrame#suggestionCard QPushButton#download {{ min-height: 30px; padding: 0 14px; border: none; border-radius: 9px;
     background: {c['accent']}; color: {c['onAccent']}; font-weight: 600; }}
 QFrame#suggestionCard QPushButton#dismiss {{ min-height: 30px; padding: 0 12px; border: 1px solid {c['border']};

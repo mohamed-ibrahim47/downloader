@@ -68,6 +68,17 @@ class SettingsPage(QWidget):
         col.addWidget(self._subs)
         col.addWidget(self._suggest)
         col.addWidget(self._learned)
+        self._meaning = QCheckBox("Match by meaning", objectName="rec_meaning")
+        self._meaning.setToolTip("For you compares what videos are about, not only the words they share")
+        self._meaning.setChecked(settings.rec_meaning)
+        self._meaning.toggled.connect(lambda on: self._set(rec_meaning=on))
+        self._files = QCheckBox("Use file downloads for suggestions", objectName="rec_files")
+        self._files.setToolTip("Programs, archives and course videos you download shape the suggestions; "
+                               "documents and pictures never do")
+        self._files.setChecked(settings.rec_files)
+        self._files.toggled.connect(lambda on: self._set(rec_files=on))
+        col.addWidget(self._meaning)
+        col.addWidget(self._files)
         trainer_row = QHBoxLayout()
         trainer_row.addWidget(QLabel("Train it with", objectName="panelLabel"))
         self._trainer = QComboBox(objectName="rec_trainer")
@@ -87,6 +98,10 @@ class SettingsPage(QWidget):
 
     def set_settings(self, settings: Settings) -> None:
         self._settings = settings
+        for box, on in ((self._meaning, settings.rec_meaning), (self._files, settings.rec_files)):
+            box.blockSignals(True)  # changed elsewhere (the For you banner): show it, don't send it back
+            box.setChecked(on)
+            box.blockSignals(False)
         for key, field in self._fields.items():
             if not field.hasFocus():
                 field.setText(getattr(settings, key))

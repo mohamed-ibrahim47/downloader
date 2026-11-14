@@ -6,10 +6,13 @@ that arrives late is ignored, so it can never overwrite a newer list.
 """
 from __future__ import annotations
 
+import time
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea,
                                QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
+from ..engine.recommend.embed import DIM
 from ..engine.recommend.learn import Weights
 from ..engine.recommend.neural import Net
 from ..engine.recommend.rank import Suggestion
@@ -23,6 +26,7 @@ COLD = "Download a few videos and suggestions will show up here."
 EMPTY = "No new suggestions. Try Refresh later."
 LOADING = "Looking for new videos…"
 WORDS = 15  # profile words shown in "Why this order?"
+BANNER = "For you now matches by meaning, not just words"
 
 
 def _plain(text: str, name: str) -> QLabel:
@@ -37,16 +41,40 @@ def _menu_text(text: str) -> str:
 
 
 def _score_text(s: Suggestion) -> str:
+    meaning = f" · meaning {s.meaning:.2f}" if s.meaning else ""
     if s.learned:  # a learned score (v2, v3) is a probability; similarity and channel are only two of its inputs
-        return f"chance {s.score:.0%} (learned) · similarity {s.similarity:.2f} · channel {s.boost:.2f}"
+        return f"chance {s.score:.0%} (learned) · similarity {s.similarity:.2f}{meaning} · channel {s.boost:.2f}"
+    if s.meaning:  # v4: v1's formula with meaning mixed in
+        return f"score {s.score:.2f} · similarity {s.similarity:.2f}{meaning} · channel {s.boost:.2f}"
     return f"score {s.score:.2f} = similarity {s.similarity:.2f} + channel {s.boost:.2f}"
+
+
+def banner_text(example: tuple[str, str] | None) -> str:
+    if example:
+        return f'{BANNER}: "{example[0]}" can bring up "{example[1]}".'
+    return f"{BANNER}."
+
+
+def nearest_text(pairs: list[tuple[str, list[str]]]) -> str:
+    """What the embeddings learned, for the profile's top words: `piano → cover, acoustic`."""
+    if not pairs:
+        return ""
+    return "\n".join(["Nearest words:"] + [f"{w} → {', '.join(near)}" for w, near in pairs])
+
+
+def _vectors_text(meta: dict) -> str:
+    words = f"word embeddings: {meta.get('words', 0):,} words × {DIM}"
+    if meta.get("source") == "own":
+        when = time.strftime("%Y-%m-%d", time.localtime(meta["at"])) if meta.get("at") else ""
+        return f"{words} · retrained on {meta.get('titles', 0)} of your titles, {when}".rstrip(", ")
+    return f"{words} · starter, trained on public titles"
 
 
 TRAINER_NAMES = {"hand": "hand-written trainer", "sklearn": "scikit-learn"}
 ACTIVATION_NAMES = {"relu": "ReLU", "leaky_relu": "leaky ReLU", "tanh": "tanh", "sigmoid": "sigmoid"}
 
 
-def ranker_text(model: dict | None, ranker: str) -> str:
+def ranker_text(model: dict | None, ranker: str, vectors_meta: dict | None = None) -> str:
     """The "Why this order?" block: which ranker is on, how learning goes, and the learned weights."""
     lines = []
     weights = Weights.from_json(model["weights"]) if model and model.get("weights") else None
@@ -56,6 +84,8 @@ def ranker_text(model: dict | None, ranker: str) -> str:
         lines.append(f"Ranked by: Learned (v3), small neural network ({shape})")
     elif ranker == "v2" and weights:
         lines.append(f"Ranked by: Learned (v2), {TRAINER_NAMES.get(weights.trainer, weights.trainer)}")
+    elif ranker == "v4":
+        lines.append("Ranked by: Meaning (v4), " + _vectors_text(vectors_meta or {}))
     elif ranker.startswith("starter-"):
         lines.append(f"Ranked by: Starter ({ranker.removeprefix('starter-')}), trained on simulated months "
                      "until your own log is big enough")
@@ -66,10 +96,11 @@ def ranker_text(model: dict | None, ranker: str) -> str:
         if ranker == "v1" and model.get("active"):
             reason += ". Turned off in Settings"
         lines.append(reason)
-        ndcg = (model.get("report") or {}).get("ndcg") or {}
-        if "v3" in ndcg:
+        report = model.get("report") or {}
+        ndcg = report.get("ndcg") or {}
+        if ("v3" in ndcg or "v4" in ndcg) and report.get("test_lists", 1) > 0:  # no lists yet: nothing measured
             lines.append("NDCG@10 on your newest lists: "
-                         + " · ".join(f"{k} {ndcg[k]:.2f}" for k in ("v1", "v2", "v3") if k in ndcg))
+                         + " · ".join(f"{k} {ndcg[k]:.2f}" for k in ("v1", "v4", "v2", "v3") if k in ndcg))
     compare = {name: Weights.from_json(text) for name, text in (model or {}).get("compare", {}).items()}
     if compare:
         names = [n for n in ("hand", "sklearn") if n in compare]
@@ -138,6 +169,7 @@ class SuggestionCard(QFrame):
 
 class ForYouPage(QWidget):
     download_requested = Signal(str)  # the video's URL
+    meaning_off_requested = Signal()  # the banner's "Turn off": the window saves the setting
 
     def __init__(self, recommender: Recommender, parent=None):
         super().__init__(parent, objectName="page")
@@ -172,16 +204,33 @@ class ForYouPage(QWidget):
             bar.addWidget(w)
         col.addLayout(bar)
 
+        self.banner = QFrame(objectName="meaningBanner")
+        row = QHBoxLayout(self.banner)
+        row.setContentsMargins(12, 8, 8, 8)
+        self._banner_text = _plain("", "bannerText")
+        got_it = QPushButton("Got it", objectName="secondaryButton")
+        got_it.clicked.connect(self._banner_got_it)
+        turn_off = QPushButton("Turn off", objectName="secondaryButton")
+        turn_off.clicked.connect(self._banner_turn_off)
+        row.addWidget(self._banner_text, 1)
+        row.addWidget(got_it)
+        row.addWidget(turn_off)
+        self.banner.hide()
+        col.addWidget(self.banner)
+
         self._offline = _plain("", "offline")
         self._offline.hide()
         self._ranker = _plain("", "rankerInfo")
         self._ranker.hide()
         self._words = _plain("", "profileWords")
         self._words.hide()
+        self._nearest = _plain("", "nearestWords")
+        self._nearest.hide()
         self._message = _plain("", "muted")
         col.addWidget(self._offline)
         col.addWidget(self._ranker)
         col.addWidget(self._words)
+        col.addWidget(self._nearest)
         col.addWidget(self._message)
 
         self._list = QVBoxLayout()
@@ -295,11 +344,17 @@ class ForYouPage(QWidget):
             self._set_ranker()
         self._words.setVisible(why and bool(self._shown))
         self._ranker.setVisible(why and bool(self._shown))
+        self._nearest.setVisible(why and bool(self._shown) and bool(self._nearest.text()))
+        due = bool(self._shown) and self._rec.banner_due()
+        if due:
+            self._banner_text.setText(banner_text(self._rec.example()))
+        self.banner.setVisible(due)
         self._fill_blocked()
         self._set_state("list" if self._shown else "empty")
 
     def _set_ranker(self) -> None:
-        self._ranker.setText(ranker_text(self._rec.model(), self._rec.ranker()))
+        self._ranker.setText(ranker_text(self._rec.model(), self._rec.ranker(), self._rec.vectors_meta()))
+        self._nearest.setText(nearest_text(self._rec.nearest_words()))
 
     def _set_words(self, words: list[tuple[str, float]]) -> None:
         self._words.setText("Your words: " + " · ".join(f"{w} {v:.2f}" for w, v in words))
@@ -325,8 +380,20 @@ class ForYouPage(QWidget):
             self._set_ranker()
         self._words.setVisible(on and bool(self._shown))
         self._ranker.setVisible(on and bool(self._shown))
+        self._nearest.setVisible(on and bool(self._shown) and bool(self._nearest.text()))
         for card in self._cards:
             card.score.setVisible(on)
+
+    # ---- the "match by meaning" banner ------------------------------------------------
+
+    def _banner_got_it(self) -> None:
+        self._rec.banner_done()
+        self.banner.hide()
+
+    def _banner_turn_off(self) -> None:
+        self._rec.banner_done()
+        self.banner.hide()
+        self.meaning_off_requested.emit()
 
     # ---- feedback: re-rank from the cache, no new search ----------------------------
 

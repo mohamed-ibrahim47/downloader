@@ -212,3 +212,32 @@ def test_changing_the_trainer_retrains_in_the_background(win, qtbot, monkeypatch
     monkeypatch.setattr(win.recommender, "train", lambda: trained.append(True))
     win.apply_settings(dataclasses.replace(win.settings, rec_trainer="sklearn"))
     qtbot.waitUntil(lambda: bool(trained), timeout=3000)
+
+
+def test_settings_page_has_the_meaning_and_files_checkboxes(qtbot):
+    got = []
+    page = SettingsPage(Settings(), got.append)
+    qtbot.addWidget(page)
+    meaning = page.findChild(QCheckBox, "rec_meaning")
+    files = page.findChild(QCheckBox, "rec_files")
+    assert meaning.text() == "Match by meaning" and meaning.isChecked()
+    assert files.text() == "Use file downloads for suggestions" and files.isChecked()
+    meaning.setChecked(False)
+    assert got[-1].rec_meaning is False
+    files.setChecked(False)
+    assert got[-1].rec_files is False
+    page.set_settings(dataclasses.replace(got[-1], rec_meaning=True))
+    assert meaning.isChecked()
+
+
+@pytest.mark.parametrize("change", [{"rec_meaning": False}, {"rec_files": False}])
+def test_meaning_toggle_retrains(win, qtbot, monkeypatch, change):
+    trained = []
+    monkeypatch.setattr(win.recommender, "train", lambda: trained.append(True))
+    win.apply_settings(dataclasses.replace(win.settings, **change))
+    qtbot.waitUntil(lambda: bool(trained), timeout=3000)
+
+
+def test_banner_turn_off_clears_the_setting(win):
+    win.for_you_page.meaning_off_requested.emit()
+    assert win.settings.rec_meaning is False

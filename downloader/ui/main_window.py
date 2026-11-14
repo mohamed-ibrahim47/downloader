@@ -74,6 +74,8 @@ class MainWindow(QMainWindow):
         self.settings_page = SettingsPage(settings, self.apply_settings)
         self.for_you_page = ForYouPage(self.recommender)
         self.for_you_page.download_requested.connect(self._download_suggestion)
+        self.for_you_page.meaning_off_requested.connect(
+            lambda: self.apply_settings(dataclasses.replace(self.settings, rec_meaning=False)))
         for page in (self.for_you_page, self.queue_page, self.scheduler_page, self.settings_page):
             self.pages.addWidget(page)
         body.addWidget(self.pages, 1)
@@ -347,7 +349,9 @@ class MainWindow(QMainWindow):
 
     def apply_settings(self, settings: Settings) -> None:
         theme_changed = settings.theme != self.settings.theme
-        trainer_changed = settings.rec_trainer != self.settings.rec_trainer
+        trainer_changed = (settings.rec_trainer != self.settings.rec_trainer
+                           or settings.rec_meaning != self.settings.rec_meaning
+                           or settings.rec_files != self.settings.rec_files)
         self.settings = settings
         settings.save(self.store)
         self.ctl.apply_settings(settings)
@@ -357,7 +361,7 @@ class MainWindow(QMainWindow):
         if not settings.suggest_videos and self.pages.currentWidget() is self.for_you_page:
             self._go_to_downloads()  # don't leave the owner on a page that just disappeared
         if trainer_changed:
-            run_in_pool(self.recommender.train)  # the model on show should come from the chosen trainer
+            run_in_pool(self.recommender.train)  # the model on show should come from today's choices
         if theme_changed:
             self._apply_theme()
         else:

@@ -282,3 +282,100 @@ def test_ranker_text_for_the_starter_says_how_far_the_own_log_is():
     text = ranker_text(model, "starter-v2")
     assert "Starter (v2), trained on simulated months" in text and "30 of 100 rows" in text
     assert "Hand-tuned" not in text
+
+
+# ---- v4: the banner, v4 in "Why this order?", nearest words (design v4, E8) ------------------------
+
+from downloader.engine.recommend import starter_vectors  # noqa: E402
+from downloader.engine.recommend.embed import Vectors  # noqa: E402
+from downloader.ui.for_you_page import nearest_text, ranker_text  # noqa: E402
+
+STARTER = Vectors(["blank", "space", "style", "shake", "song", "piano"],
+                  [[1, 0, 0], [0.9, 0.1, 0], [0.8, 0.2, 0], [0.7, 0.3, 0], [0.5, 0.5, 0], [0, 0, 1]], [9] * 6)
+
+
+@pytest.fixture
+def meaning_rec(rec, monkeypatch):
+    monkeypatch.setattr(starter_vectors, "vectors", lambda: STARTER)
+    monkeypatch.setattr(starter_vectors, "DEFAULT_ON", True)
+    monkeypatch.setattr(starter_vectors, "EXAMPLE", ("piano cover", "acoustic version"))
+    return rec
+
+
+def _open(qtbot, rec):
+    rec.refresh()
+    page = _page(qtbot, rec)
+    page.open()
+    return page
+
+
+def test_banner_shows_once_with_example(qtbot, meaning_rec):
+    page = _open(qtbot, meaning_rec)
+    assert page.banner.isVisibleTo(page)
+    assert ('For you now matches by meaning, not just words: "piano cover" can bring up "acoustic version".'
+            in _texts(page.banner))
+    buttons = [b.text() for b in page.banner.findChildren(QPushButton)]
+    assert buttons == ["Got it", "Turn off"]
+
+
+def test_banner_without_example(qtbot, meaning_rec, monkeypatch):
+    monkeypatch.setattr(starter_vectors, "EXAMPLE", None)
+    page = _open(qtbot, meaning_rec)
+    assert _texts(page.banner).strip() == "For you now matches by meaning, not just words."
+
+
+def test_no_banner_without_meaning(qtbot, rec):
+    page = _open(qtbot, rec)
+    assert not page.banner.isVisibleTo(page)
+
+
+def test_got_it_hides_and_marks_done(qtbot, meaning_rec):
+    page = _open(qtbot, meaning_rec)
+    [b for b in page.banner.findChildren(QPushButton) if b.text() == "Got it"][0].click()
+    assert not page.banner.isVisibleTo(page) and not meaning_rec.banner_due()
+    page._render()
+    assert not page.banner.isVisibleTo(page)
+
+
+def test_turn_off_asks_to_clear_the_setting_and_hides(qtbot, meaning_rec):
+    page = _open(qtbot, meaning_rec)
+    with qtbot.waitSignal(page.meaning_off_requested, timeout=1000):
+        [b for b in page.banner.findChildren(QPushButton) if b.text() == "Turn off"][0].click()
+    assert not page.banner.isVisibleTo(page) and not meaning_rec.banner_due()
+
+
+def test_ranker_text_v4():
+    model = {"active": False, "ranker": "v4", "base": "v4", "reason": "v4 beats v1", "compare": {},
+             "report": {"ndcg": {"v1": 0.58, "v4": 0.61, "v2": 0.6, "v3": 0.55}}}
+    own = {"source": "own", "words": 7812, "titles": 412, "at": time.mktime((2026, 11, 20, 12, 0, 0, 0, 0, -1))}
+    text = ranker_text(model, "v4", own)
+    assert ("Ranked by: Meaning (v4), word embeddings: 7,812 words × 32 · retrained on 412 of your titles, "
+            "2026-11-20") in text
+    assert "NDCG@10 on your newest lists: v1 0.58 · v4 0.61 · v2 0.60 · v3 0.55" in text
+    starter = ranker_text(model, "v4", {"source": "starter", "words": 8000, "titles": 0, "at": None})
+    assert "Meaning (v4), word embeddings: 8,000 words × 32 · starter, trained on public titles" in starter
+
+
+def test_nearest_words_lines():
+    text = nearest_text([("piano", ["cover", "acoustic", "guitar", "chords"]), ("lion", ["wildlife"])])
+    assert text == "Nearest words:\npiano → cover, acoustic, guitar, chords\nlion → wildlife"
+    assert nearest_text([]) == ""
+
+
+def test_why_shows_nearest_words(qtbot, meaning_rec):
+    page = _open(qtbot, meaning_rec)
+    page._why.setChecked(True)
+    assert "Nearest words:" in _texts(page) and "blank → " in _texts(page)
+
+
+def test_v4_card_score_names_meaning(qtbot, meaning_rec):
+    page = _open(qtbot, meaning_rec)
+    page._why.setChecked(True)
+    text = page.cards()[0].findChild(QLabel, "score").text()
+    assert "meaning" in text and "chance" not in text
+
+
+def test_no_ndcg_line_before_any_test_list():
+    model = {"active": False, "ranker": "v4", "reason": "Learning: 0 of 100 rows", "compare": {},
+             "report": {"test_lists": 0, "ndcg": {"v1": 0.0, "v4": 0.0}}}
+    assert "NDCG" not in ranker_text(model, "v4", {"source": "starter", "words": 8000})

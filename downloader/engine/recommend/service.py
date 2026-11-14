@@ -308,6 +308,9 @@ class Recommender:
             scorer = None
         picks = rank(profile, cands, k, self._rng, discovery_id=self._discovery, model=model, scorer=scorer,
                      meaning=index)
+        if name == "v4":
+            for s in picks:
+                s.learned = False  # v4's score is v1's formula with meaning mixed in, not a learned probability
         self._discovery = next((s.candidate.video_id for s in picks if s.discovery), self._discovery)
         if log:
             self._log_shown(picks, profile, name)
