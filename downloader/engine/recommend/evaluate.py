@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from .dataset import Row
 from .features import NAMES, at_top
 from .learn import Weights
+from .meaning import v4_score
 from .neural import Net, NetTrainer
 from .rank import CHANNEL_BOOST
 
@@ -79,7 +80,12 @@ def _v3(r: Row, m) -> float:
     return m["v3"].logit(at_top(r.x))
 
 
-RANKERS = {"baseline": _baseline, "v1": _v1, "v2": _v2, "v3": _v3}
+def _v4(r: Row, m) -> float:
+    return v4_score(r.x[0], r.x[8], r.x[1], m["mix"])  # v1's formula with meaning mixed in
+
+
+RANKERS = {"baseline": _baseline, "v1": _v1, "v4": _v4, "v2": _v2, "v3": _v3}
+SIMPLER_FIRST = ("v1", "v4", "v2", "v3")  # on a tie, the simpler ranker stays
 
 
 @dataclass
@@ -111,6 +117,8 @@ def rank_lists(rows: list[Row], models: dict) -> tuple[int, dict[str, float], di
     for name, score in RANKERS.items():
         if name in ("v2", "v3") and name not in models:
             continue
+        if name == "v4" and "mix" not in models:
+            continue  # no vectors, or meaning off: nothing to measure
         # Ties go by video id: neutral, and not v1's order, which would favour v1.
         orders = [[r.label for r in sorted(rs, key=lambda r: (-score(r, models), r.video_id))] for rs in judged]
         ndcg[name] = sum(map(ndcg_at, orders)) / len(orders) if orders else 0.0
@@ -118,17 +126,21 @@ def rank_lists(rows: list[Row], models: dict) -> tuple[int, dict[str, float], di
     return len(judged), ndcg, hit3
 
 
-def evaluate(rows: list[Row], trainer, net_trainer: NetTrainer | None = None) -> Report:
+def evaluate(rows: list[Row], trainer, net_trainer: NetTrainer | None = None, mix: float | None = None) -> Report:
+    """`mix`: v4's MEANING_MIX; None leaves v4 out (no vectors, or "Match by meaning" off)."""
     rep = Report(len(rows), sum(r.label for r in rows))
     train, test = split(rows)
+    fixed = {} if mix is None else {"mix": mix}
     if len({r.label for r in train}) < 2:
-        return rep  # nothing to learn from yet: every training row says the same thing
+        # Nothing to learn from yet, but v1 and v4 need no training: they can still be compared.
+        rep.test_lists, rep.ndcg, rep.hit3 = rank_lists(test, fixed)
+        return rep
     m = trainer.fit(NAMES, [r.x for r in train], [r.label for r in train], [r.weight for r in train])
     rep.weights = m
     net = (net_trainer or NetTrainer()).fit(NAMES, [r.x for r in train], [r.label for r in train],
                                             [r.weight for r in train])
     rep.net = net
-    rep.test_lists, rep.ndcg, rep.hit3 = rank_lists(test, {"v2": m, "v3": net})
+    rep.test_lists, rep.ndcg, rep.hit3 = rank_lists(test, {**fixed, "v2": m, "v3": net})
     probs = [m.prob(at_top(r.x)) for r in test]
     rep.auc = auc(probs, [r.label for r in test])
     rep.log_loss = log_loss([m.prob(r.x) for r in test], [r.label for r in test], [r.weight for r in test])
@@ -151,15 +163,41 @@ def gate(rep: Report) -> tuple[bool, str]:
     return True, f"v2 {verb} v1 on your newest lists (NDCG {v2:.2f} vs {v1:.2f})"
 
 
-def choose(rep: Report) -> tuple[str, str]:
-    """Which ranker should rank the page: "v1", "v2" or "v3", with the reason in the owner's words (v3 D4).
+def base(rep: Report, meaning_on: bool, default_on: bool) -> tuple[str, str]:
+    """The ranker that needs no training: v4 or v1 (design v4, E7), with the reason in the owner's words.
 
-    v3 must beat v2 outright: on a tie the simpler model wins. Both must at least match v1.
+    v4 when "Match by meaning" is on and either it beat v1 on the simulated months (`default_on`) or it beats
+    v1 on the owner's own newest lists. Once those lists exist they decide, also against the starter's check.
     """
+    if not meaning_on:
+        return "v1", "Match by meaning is off"
+    own = rep.test_lists >= MIN_TEST_LISTS and "v4" in rep.ndcg
+    v1, v4 = rep.ndcg.get("v1", 0.0), rep.ndcg.get("v4", 0.0)
+    if own and v4 > v1:
+        return "v4", f"v4 beats v1 on your newest lists (NDCG {v4:.2f} vs {v1:.2f})"
+    if own and v4 < v1:
+        return "v1", f"v4 didn't beat v1 on your newest lists (NDCG {v4:.2f} vs {v1:.2f})"
+    if default_on:
+        return "v4", "Meaning (v4) is on: it beat v1 on the simulated months"
+    return "v1", "v4 hasn't beaten v1 on your lists yet"
+
+
+def choose(rep: Report, meaning_on: bool = False, default_on: bool = False) -> tuple[str, str]:
+    """Which ranker should rank the page: "v1", "v4", "v2" or "v3", with the reason in the owner's words.
+
+    The base (v1 or v4, see `base`) ranks until the learned ones pass the size gate. Then v2 must at least
+    match the base, and v3 must beat v2 outright and match the base: on a tie the simpler model wins.
+    """
+    first, first_why = base(rep, meaning_on, default_on)
     if rep.rows < MIN_ROWS or rep.downloads < MIN_DOWNLOADS or rep.weights is None or rep.test_lists < MIN_TEST_LISTS:
-        return "v1", gate(rep)[1]
-    v1, v2, v3 = rep.ndcg["v1"], rep.ndcg["v2"], rep.ndcg.get("v3", 0.0)
-    if rep.net is not None and v3 > v2 and v3 >= v1:
-        return "v3", f"v3 beats v2 and v1 on your newest lists (NDCG {v3:.2f} vs {v2:.2f} and {v1:.2f})"
-    on, why = gate(rep)
-    return ("v2", why) if on else ("v1", why)
+        return first, gate(rep)[1]
+    b, v2, v3 = rep.ndcg.get(first, 0.0), rep.ndcg["v2"], rep.ndcg.get("v3", 0.0)
+    if rep.net is not None and v3 > v2 and v3 >= b:
+        return "v3", f"v3 beats v2 and {first} on your newest lists (NDCG {v3:.2f} vs {v2:.2f} and {b:.2f})"
+    if first == "v1":
+        on, why = gate(rep)
+        return ("v2", why) if on else ("v1", why)
+    if v2 >= b:
+        verb = "beats" if v2 > b else "matches"
+        return "v2", f"v2 {verb} v4 on your newest lists (NDCG {v2:.2f} vs {b:.2f})"
+    return "v4", f"{first_why}; v2 didn't beat it yet (NDCG {v2:.2f} vs {b:.2f})"

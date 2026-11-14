@@ -127,3 +127,75 @@ def test_choose_picks_v3_only_when_it_beats_v2():
 def test_choose_keeps_v1_while_the_log_is_small():
     ranker, why = choose(evaluate(_world()[:MIN_ROWS - 1], HandTrainer(), NetTrainer(max_epochs=5)))
     assert ranker == "v1" and f"of {MIN_ROWS} rows" in why
+
+
+# ---- v4 (design v4, E7) -------------------------------------------------------------------------
+
+from downloader.engine.recommend.evaluate import MIN_TEST_LISTS, base  # noqa: E402
+
+
+def _scored4(v1, v4, v2=0.0, v3=0.0, lists=MIN_TEST_LISTS):
+    rep = copy.copy(_evaluated())
+    rep.ndcg = {**rep.ndcg, "v1": v1, "v4": v4, "v2": v2, "v3": v3}
+    rep.test_lists = lists
+    return rep
+
+
+def test_v4_is_scored_when_a_mix_is_given():
+    rep = evaluate(_world(), HandTrainer(), mix=0.5)
+    assert "v4" in rep.ndcg
+    assert "v4" not in evaluate(_world(), HandTrainer()).ndcg
+
+
+def test_v4_follows_meaning():
+    rows = []
+    for r in range(20):  # the download is the one close in meaning, with no word in common
+        for i in range(10):
+            hit = i == r % 10
+            x = [0.1, 0.0, 0, 1.0, 0, 0, 0.0, 0, 0.9 if hit else 0.1]
+            rows.append(Row(f"{r}-{i}", x, 1 if hit else 0, 1.0 if hit else 0.3, float(r), float(r)))
+    rep = evaluate(rows, HandTrainer(), mix=0.5)
+    assert rep.ndcg["v4"] == pytest.approx(1.0) and rep.ndcg["v4"] > rep.ndcg["v1"]
+
+
+def test_base_is_v4_when_starter_says_so():
+    rep = evaluate([], HandTrainer(), mix=0.5)
+    assert base(rep, meaning_on=True, default_on=True)[0] == "v4"
+
+
+def test_base_is_v4_when_it_beats_v1_on_your_lists():
+    ranker, why = base(_scored4(0.5, 0.6), meaning_on=True, default_on=False)
+    assert ranker == "v4" and "v4 beats v1" in why
+
+
+def test_base_tie_keeps_v1():
+    assert base(_scored4(0.5, 0.5), meaning_on=True, default_on=False)[0] == "v1"
+    assert base(_scored4(0.5, 0.9, lists=MIN_TEST_LISTS - 1), meaning_on=True, default_on=False)[0] == "v1"
+
+
+def test_meaning_off_base_is_v1():
+    assert base(_scored4(0.5, 0.9), meaning_on=False, default_on=True)[0] == "v1"
+
+
+def test_v2_measured_against_base():
+    assert choose(_scored4(0.5, 0.7, v2=0.6), meaning_on=True, default_on=True)[0] == "v4"
+    assert choose(_scored4(0.5, 0.7, v2=0.7), meaning_on=True, default_on=True)[0] == "v2"
+
+
+def test_v3_must_beat_v2_and_match_base():
+    assert choose(_scored4(0.5, 0.7, v2=0.6, v3=0.65), meaning_on=True, default_on=True)[0] == "v4"
+    assert choose(_scored4(0.5, 0.6, v2=0.6, v3=0.7), meaning_on=True, default_on=True)[0] == "v3"
+    assert choose(_scored4(0.5, 0.6, v2=0.7, v3=0.7), meaning_on=True, default_on=True)[0] == "v2"
+
+
+def test_gate_closed_returns_base():
+    rep = evaluate(_world()[:50], HandTrainer(), mix=0.5)
+    ranker, why = choose(rep, meaning_on=True, default_on=True)
+    assert ranker == "v4" and f"of {MIN_ROWS} rows" in why
+
+
+def test_test_lists_counted_without_training():
+    rows = [_row(r, 0.9 if i == 0 else 0.1, 0, 1 if (i == 0 and r >= 16) else 0, vid=f"{r}-{i}")
+            for r in range(20) for i in range(5)]  # downloads only in the newest lists: one-class training
+    rep = evaluate(rows, HandTrainer(), mix=0.5)
+    assert rep.weights is None and rep.test_lists >= 3 and "v4" in rep.ndcg
