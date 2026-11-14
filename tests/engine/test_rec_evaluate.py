@@ -1,11 +1,14 @@
+import copy
+import functools
 import math
 
 import pytest
 
 from downloader.engine.recommend.dataset import Row
-from downloader.engine.recommend.evaluate import (MIN_DOWNLOADS, MIN_ROWS, auc, evaluate, gate, hit_at, log_loss,
-                                                  ndcg_at, split)
+from downloader.engine.recommend.evaluate import (MIN_DOWNLOADS, MIN_ROWS, auc, choose, evaluate, gate, hit_at,
+                                                  log_loss, ndcg_at, split)
 from downloader.engine.recommend.learn import HandTrainer
+from downloader.engine.recommend.neural import NetTrainer
 
 
 def _row(refresh, sim, aff, label, vid=None, rank=1):
@@ -91,3 +94,36 @@ def test_one_label_only_in_training_does_not_crash():
     rows = [_row(r, 0.1, 0, 0) for r in range(5)] + [_row(9, 0.9, 0, 1)]
     rep = evaluate(rows, HandTrainer())
     assert rep.weights is None and rep.test_lists <= 1
+
+
+def test_v3_is_measured_on_the_same_lists():
+    rep = _evaluated()
+    assert rep.net is not None and rep.net.epochs >= 1
+    assert rep.ndcg["v3"] > rep.ndcg["v1"]
+    assert 0.0 <= rep.v3_auc <= 1.0 and rep.v3_log_loss > 0
+
+
+@functools.cache
+def _evaluated():
+    return evaluate(_world(), HandTrainer())
+
+
+def _scored(v1, v2, v3):
+    rep = copy.copy(_evaluated())
+    rep.ndcg = {**rep.ndcg, "v1": v1, "v2": v2, "v3": v3}
+    return rep
+
+
+def test_choose_picks_v3_only_when_it_beats_v2():
+    assert choose(_scored(0.5, 0.6, 0.7))[0] == "v3"
+    ranker, why = choose(_scored(0.5, 0.6, 0.6))
+    assert ranker == "v2"  # a tie goes to the simpler model
+    assert choose(_scored(0.5, 0.4, 0.45))[0] == "v1"  # v3 above v2 but under v1
+    assert choose(_scored(0.5, 0.4, 0.6))[0] == "v3"
+    assert choose(_scored(0.5, 0.6, 0.55))[0] == "v2"
+    assert "v3" in choose(_scored(0.5, 0.6, 0.7))[1]
+
+
+def test_choose_keeps_v1_while_the_log_is_small():
+    ranker, why = choose(evaluate(_world()[:MIN_ROWS - 1], HandTrainer(), NetTrainer(max_epochs=5)))
+    assert ranker == "v1" and f"of {MIN_ROWS} rows" in why

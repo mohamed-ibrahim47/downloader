@@ -29,7 +29,7 @@ from .learn import sigmoid, standardise
 
 HIDDEN = 8  # hidden neurons: 8×8 + 8 + 8 + 1 = 81 weights for 8 inputs
 ACTIVATION = "relu"
-LAMBDA = 0.001  # L2 strength
+LAMBDA = 0.01  # L2 strength: 0.001 overfit the simulated months
 RATE = 0.05  # learning rate
 MOMENTUM = 0.9  # how much of the last step carries into the next
 BATCH = 32  # rows per step

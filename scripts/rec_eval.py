@@ -2,14 +2,20 @@
 
     .venv/Scripts/python scripts/rec_eval.py                 # the app's own database
     .venv/Scripts/python scripts/rec_eval.py path/to/db.sqlite
+    .venv/Scripts/python scripts/rec_eval.py path/to/db.sqlite --activation tanh --hidden 16
+
+`--activation` (relu, leaky_relu, tanh, sigmoid) and `--hidden` change v3's network, to compare them on the
+same rows. The app always uses the defaults in `recommend/neural.py`.
 
 The database is opened read-only; nothing is written or trained into it.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -19,6 +25,7 @@ from downloader.engine.recommend import evaluate  # noqa: E402
 from downloader.engine.recommend.dataset import rows as training_rows  # noqa: E402
 from downloader.engine.recommend.features import NAMES  # noqa: E402
 from downloader.engine.recommend.learn import available_trainers, trainer  # noqa: E402
+from downloader.engine.recommend.neural import ACTIVATION, ACTIVATIONS, HIDDEN, NetTrainer  # noqa: E402
 
 
 def _read(path: Path) -> tuple[list[tuple], float | None]:
@@ -37,7 +44,12 @@ def _read(path: Path) -> tuple[list[tuple], float | None]:
 
 
 def main() -> None:
-    path = Path(sys.argv[1]) if len(sys.argv) > 1 else data_home() / "downloader.db"
+    ap = argparse.ArgumentParser(description="How the For you rankers do on a database.")
+    ap.add_argument("db", nargs="?", type=Path, default=data_home() / "downloader.db")
+    ap.add_argument("--activation", choices=sorted(ACTIVATIONS), default=ACTIVATION)
+    ap.add_argument("--hidden", type=int, default=HIDDEN)
+    args = ap.parse_args()
+    path = args.db
     events, last = _read(path)
     rows = training_rows(events, open_refresh=last)
     lists = len({r.refresh for r in rows})
@@ -45,10 +57,12 @@ def main() -> None:
           f"{sum(1 for r in rows if not r.label and r.weight == 1.0)} dismissed, "
           f"{sum(1 for r in rows if r.weight < 1.0)} scrolled past\n")
     for name in available_trainers():
-        rep = evaluate.evaluate(rows, trainer(name))
-        on, why = evaluate.gate(rep)
-        print(f"== trainer: {name}")
-        print(f"   gate: {'ON' if on else 'off'}: {why}")
+        started = time.time()
+        rep = evaluate.evaluate(rows, trainer(name), NetTrainer(hidden=args.hidden, activation=args.activation))
+        took = time.time() - started
+        ranker, why = evaluate.choose(rep)
+        print(f"== trainer: {name} (v2) · v3: {args.hidden} hidden, {args.activation}")
+        print(f"   ranks the page: {ranker}: {why}")
         if rep.weights is None:
             print("   (nothing to train on yet)\n")
             continue
@@ -57,6 +71,9 @@ def main() -> None:
         for r in evaluate.RANKERS:
             print(f"   {r:<10}{rep.ndcg.get(r, 0):>9.3f}{rep.hit3.get(r, 0):>8.2f}")
         print(f"   v2 AUC {rep.auc:.3f}, log-loss {rep.log_loss:.3f}")
+        if rep.net is not None:
+            print(f"   v3 AUC {rep.v3_auc:.3f}, log-loss {rep.v3_log_loss:.3f}, {rep.net.size()} weights, "
+                  f"stopped after {rep.net.epochs} passes ({took:.1f} s to train both)")
         print("   weights (standardised, trained on the older 80% of lists):")
         for feature, w in zip(NAMES, rep.weights.w):
             print(f"     {feature:<14}{w:+.3f}")
