@@ -261,3 +261,24 @@ def test_a_learned_ranker_shows_its_weights_and_honest_scores(qtbot, rec):
     assert "Learned (v2)" in text and "similarity" in text and "1.50" in text and "1.49" in text
     score = page.cards()[0].findChild(QLabel, "score").text()
     assert "chance" in score and "=" not in score  # not v1's sum any more
+
+
+def test_ranker_text_for_v3_shows_the_network_and_the_scores():
+    from downloader.engine.recommend.features import NAMES
+    from downloader.engine.recommend.neural import Net
+    from downloader.ui.for_you_page import ranker_text
+    net = Net(NAMES, [[0.1] * 8] * 8, [0.0] * 8, [0.2] * 8, 0.0, [0.0] * 8, [1.0] * 8, "relu", 12)
+    model = {"active": True, "ranker": "v3", "reason": "v3 beats v2 and v1", "net": net.to_json(), "weights": None,
+             "compare": {}, "report": {"ndcg": {"baseline": 0.4, "v1": 0.58, "v2": 0.6, "v3": 0.63}}}
+    text = ranker_text(model, "v3")
+    assert "Learned (v3), small neural network (8 → 8 → 1, ReLU)" in text
+    assert "v1 0.58 · v2 0.60 · v3 0.63" in text
+
+
+def test_ranker_text_for_the_starter_says_how_far_the_own_log_is():
+    from downloader.ui.for_you_page import ranker_text
+    model = {"active": False, "reason": "Learning: 30 of 200 rows, 2 of 15 downloads", "compare": {},
+             "report": {"rows": 30, "downloads": 2}}
+    text = ranker_text(model, "starter-v2")
+    assert "Starter (v2), trained on simulated months" in text and "30 of 200 rows" in text
+    assert "Hand-tuned" not in text

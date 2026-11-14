@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QMenu, QP
                                QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from ..engine.recommend.learn import Weights
+from ..engine.recommend.neural import Net
 from ..engine.recommend.rank import Suggestion
 from ..engine.recommend.service import Recommender
 from ..engine.timecode import fmt_clock
@@ -36,20 +37,28 @@ def _menu_text(text: str) -> str:
 
 
 def _score_text(s: Suggestion) -> str:
-    if s.learned:  # v2's score is a probability; similarity and channel are only two of its inputs
+    if s.learned:  # a learned score (v2, v3) is a probability; similarity and channel are only two of its inputs
         return f"chance {s.score:.0%} (learned) · similarity {s.similarity:.2f} · channel {s.boost:.2f}"
     return f"score {s.score:.2f} = similarity {s.similarity:.2f} + channel {s.boost:.2f}"
 
 
 TRAINER_NAMES = {"hand": "hand-written trainer", "sklearn": "scikit-learn"}
+ACTIVATION_NAMES = {"relu": "ReLU", "leaky_relu": "leaky ReLU", "tanh": "tanh", "sigmoid": "sigmoid"}
 
 
 def ranker_text(model: dict | None, ranker: str) -> str:
     """The "Why this order?" block: which ranker is on, how learning goes, and the learned weights."""
     lines = []
     weights = Weights.from_json(model["weights"]) if model and model.get("weights") else None
-    if ranker == "v2" and weights:
+    net = Net.from_json(model["net"]) if model and model.get("net") else None
+    if ranker == "v3" and net:
+        shape = f"{len(net.names)} → {len(net.W1)} → 1, {ACTIVATION_NAMES.get(net.activation, net.activation)}"
+        lines.append(f"Ranked by: Learned (v3), small neural network ({shape})")
+    elif ranker == "v2" and weights:
         lines.append(f"Ranked by: Learned (v2), {TRAINER_NAMES.get(weights.trainer, weights.trainer)}")
+    elif ranker.startswith("starter-"):
+        lines.append(f"Ranked by: Starter ({ranker.removeprefix('starter-')}), trained on simulated months "
+                     "until your own log is big enough")
     else:
         lines.append("Ranked by: Hand-tuned (v1)")
     if model:
@@ -57,6 +66,10 @@ def ranker_text(model: dict | None, ranker: str) -> str:
         if ranker == "v1" and model.get("active"):
             reason += ". Turned off in Settings"
         lines.append(reason)
+        ndcg = (model.get("report") or {}).get("ndcg") or {}
+        if "v3" in ndcg:
+            lines.append("NDCG@10 on your newest lists: "
+                         + " · ".join(f"{k} {ndcg[k]:.2f}" for k in ("v1", "v2", "v3") if k in ndcg))
     compare = {name: Weights.from_json(text) for name, text in (model or {}).get("compare", {}).items()}
     if compare:
         names = [n for n in ("hand", "sklearn") if n in compare]
