@@ -277,8 +277,8 @@ def test_ranker_text_for_v3_shows_the_network_and_the_scores():
 
 def test_ranker_text_for_the_starter_says_how_far_the_own_log_is():
     from downloader.ui.for_you_page import ranker_text
-    model = {"active": False, "reason": "Learning: 30 of 200 rows, 2 of 15 downloads", "compare": {},
+    model = {"active": False, "reason": "Learning: 30 of 100 rows, 2 of 10 downloads", "compare": {},
              "report": {"rows": 30, "downloads": 2}}
     text = ranker_text(model, "starter-v2")
-    assert "Starter (v2), trained on simulated months" in text and "30 of 200 rows" in text
+    assert "Starter (v2), trained on simulated months" in text and "30 of 100 rows" in text
     assert "Hand-tuned" not in text

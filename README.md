@@ -145,7 +145,7 @@ Settings.
 
 It also learns from what you do. Every suggestion you download, dismiss or scroll past trains a
 small logistic-regression model on your PC, written by hand with gradient descent. Once it has
-enough to go on (200 suggestions and 15 downloads), it is tested against the hand-tuned ranking on
+enough to go on (100 suggestions and 10 downloads), it is tested against the hand-tuned ranking on
 your most recent lists, and it takes over only if it does at least as well. **Why this order?** says
 which ranking is on, how far learning has got, and what the model learned. Running from source with
 `pip install -e .[ml]` adds scikit-learn as a second trainer, so you can compare its weights with

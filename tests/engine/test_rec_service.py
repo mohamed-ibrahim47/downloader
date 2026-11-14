@@ -288,7 +288,7 @@ def test_a_refresh_trains_and_saves_why(rec, clock):
     clock.now += 7 * 3600
     rec.refresh()
     saved = rec.store.get_setting("rec_model")
-    assert saved["active"] is False and saved["reason"].startswith("Learning: 10 of 200 rows")
+    assert saved["active"] is False and saved["reason"].startswith("Learning: 10 of 100 rows")
     assert rec.ranker() == "v1"
 
 

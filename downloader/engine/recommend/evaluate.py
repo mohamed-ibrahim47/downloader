@@ -20,8 +20,8 @@ from .learn import Weights
 from .neural import Net, NetTrainer
 from .rank import CHANNEL_BOOST
 
-MIN_ROWS = 200
-MIN_DOWNLOADS = 15
+MIN_ROWS = 100  # owner, 2026-11-14: was 200; learning starts sooner, the time-split test still decides
+MIN_DOWNLOADS = 10
 MIN_TEST_LISTS = 3  # lists with a download in the test part; fewer and the comparison means little
 TEST_SHARE = 0.2
 K = 10
