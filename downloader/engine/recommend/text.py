@@ -36,6 +36,31 @@ def channel_token(channel: str | None) -> str | None:
     return "ch:" + name if name else None
 
 
+# Words in a file name that describe the package, not what it is (design v4, E6).
+PACKAGING_WORDS = frozenset({
+    "setup", "installer", "install", "portable", "full", "final", "release", "latest", "windows", "win",
+    "img", "dsc", "copy", "new",
+})
+_CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+_FILE_SPLIT = re.compile(r"[\s_\-.+]+")
+
+
+def file_words(filename: str) -> list[str]:
+    """The words of a file name that may say what it is: `blender-4.2.1-windows-x64.msi` → ["blender"].
+
+    Drops the extension, versions and architectures (any part with a digit), packaging words, and words
+    under 3 letters. An empty list means the name says nothing and the file is skipped.
+    """
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    out = []
+    for part in _FILE_SPLIT.split(stem):
+        for w in _CAMEL.sub(" ", part).lower().split():
+            if (len(w) >= 3 and not any(ch.isdigit() for ch in w) and w not in PACKAGING_WORDS
+                    and w not in STOP_WORDS and w not in NOISE_WORDS):
+                out.append(w)
+    return out
+
+
 def tokenize(title: str, tags: Iterable[str] = (), channel: str | None = None) -> list[str]:
     """Title words, then tag words, then the channel token."""
     tokens = _words(title)

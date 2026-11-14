@@ -51,7 +51,8 @@ class Recommender:
         self._discovery: str | None = None
 
     def profile(self) -> Profile:
-        return build_profile(self.store.all(), self.log.dismissed(), self._clock())
+        return build_profile(self.store.all(), self.log.dismissed(), self._clock(),
+                             files=Settings.load(self.store).rec_files)
 
     def ready(self) -> bool:
         return self.profile().ready
@@ -155,7 +156,7 @@ class Recommender:
         now = self._clock()
         downloads = self.store.all()
         dismissed = self.log.dismissed()
-        profile = build_profile(downloads, dismissed, now)
+        profile = build_profile(downloads, dismissed, now, files=Settings.load(self.store).rec_files)
         if not profile.ready:
             return View(False)
         have = {d.video_id for d in downloads if d.video_id}

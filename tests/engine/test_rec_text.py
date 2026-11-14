@@ -29,3 +29,21 @@ def test_numbering_and_filler_words_are_dropped():
     assert tokenize("Chopin - Nocturne Op. 9 No. 2") == ["chopin", "nocturne"]
     assert tokenize("Planet Earth II - Part 3 | Special Episode") == ["planet", "earth"]
     assert tokenize("But what is a neural network? Chapter 1") == ["neural", "network"]
+
+
+import pytest
+
+from downloader.engine.recommend.text import file_words
+
+
+@pytest.mark.parametrize("name, words", [
+    ("blender-4.2.1-windows-x64.msi", ["blender"]),
+    ("Complete_Python_Bootcamp.zip", ["complete", "python", "bootcamp"]),
+    ("03 - Python Functions.mp4", ["python", "functions"]),
+    ("VisualStudioCodeSetup-x64-1.95.exe", ["visual", "studio", "code"]),
+    ("setup_x64_v2.exe", []),
+    ("IMG_2041.zip", []),
+    ("", []),
+])
+def test_file_words(name, words):
+    assert file_words(name) == words

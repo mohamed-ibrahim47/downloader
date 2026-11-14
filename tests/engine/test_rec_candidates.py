@@ -86,3 +86,14 @@ def test_fetch_tags_each_candidate_with_its_search_kind():
     got = fetch([("TS", "channel"), ("blank space", "words")], lambda q, limit: [hit])
     assert [c.kind for c in got] == ["channel", "words"]
     assert fetch(["plain"], lambda q, limit: [hit])[0].kind is None  # a bare query has no kind
+
+
+def test_newest_file_download_searches_its_words():
+    from downloader.engine.models import Download, Kind
+    from downloader.engine.recommend.profile import build_profile
+    now = 1_800_000_000.0
+    old = [Download(url="u", kind=Kind.VIDEO, filename="f", folder="d", title=t, added_at=now - 90 * 86400)
+           for t in ("piano cover song", "guitar chords lesson")]
+    f = Download(url="u", kind=Kind.FILE, filename="Blender_3D_Modeling-4.2-x64.msi", folder="d", added_at=now)
+    qs = plan(build_profile(old + [f], [], now))
+    assert ("modeling" in qs[0][0] or "blender" in qs[0][0]) and qs[0][1] == "newest"

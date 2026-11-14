@@ -43,3 +43,34 @@ def test_channel_affinity_scaled_to_one():
 def test_ready_needs_three_downloads():
     assert not build_profile([_v("a"), _v("b")], [Dismissed("x", "c", None)], NOW).ready
     assert build_profile([_v("a"), _v("b"), _v("c")], [], NOW).ready
+
+
+def _f(filename, days_ago=0):
+    return Download(url="u", kind=Kind.FILE, filename=filename, folder="d", added_at=NOW - days_ago * DAY)
+
+
+def test_file_download_joins_at_half_weight():
+    p = build_profile([_f("blender-4.2.1-windows-x64.msi", 30)], [], NOW)
+    assert len(p.docs) == 1
+    d = p.docs[0]
+    assert d.video_id is None and d.title == "blender" and d.tokens == ["blender"]
+    assert round(d.weight, 6) == 0.25  # half of a 30-day-old video's 0.5
+
+
+def test_documents_never_join():
+    p = build_profile([_f("CV_Mohamed_2026.pdf"), _f("notes.docx"), _f("photo.jpg")], [], NOW)
+    assert p.docs == []
+
+
+def test_meaningless_file_name_skipped():
+    assert build_profile([_f("setup_x64_v2.exe")], [], NOW).docs == []
+
+
+def test_files_off_ignores_files():
+    p = build_profile([_f("Complete_Python_Bootcamp.zip"), _v("Blank Space")], [], NOW, files=False)
+    assert [d.title for d in p.docs] == ["Blank Space"]
+
+
+def test_file_has_no_channel_affinity():
+    p = build_profile([_f("Complete_Python_Bootcamp.zip"), _v("a", channel="TS")], [], NOW)
+    assert p.channels == {"TS": 1.0}

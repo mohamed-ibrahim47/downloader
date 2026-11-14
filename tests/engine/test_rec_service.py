@@ -382,3 +382,18 @@ def test_train_saves_the_net_when_v3_wins(rec, clock, store, monkeypatch):
     assert saved["active"] and saved["ranker"] == "v3" and saved["net"]
     assert "v3" in saved["report"]["ndcg"] and saved["report"]["v3_epochs"] >= 1
     assert rec.ranker() == "v3"
+
+
+def test_files_setting_controls_file_downloads_in_profile(rec, store):
+    from downloader.engine.settings import Settings
+    store.add(Download(url="u", kind=Kind.FILE, filename="Complete_Python_Bootcamp.zip", folder="d"))
+    assert "complete python bootcamp" in [d.title for d in rec.profile().docs]
+    s = Settings.load(store)
+    s.rec_files = False
+    s.save(store)
+    assert "complete python bootcamp" not in [d.title for d in rec.profile().docs]
+
+
+def test_new_settings_default_on():
+    from downloader.engine.settings import Settings
+    assert Settings().rec_meaning is True and Settings().rec_files is True

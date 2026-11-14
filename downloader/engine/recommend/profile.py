@@ -1,11 +1,12 @@
-"""Who the owner is, as the recommender sees it: their video downloads, fading with age (spec B4)."""
+"""Who the owner is, as the recommender sees it: their video downloads (and programs, archives and course
+videos fetched as files, design v4 E6), fading with age (spec B4)."""
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 
 from ..models import Download, Kind
-from .text import tokenize
+from .text import file_words, tokenize
 
 MIN_DOWNLOADS = 3  # fewer than this and there is no profile yet (cold start)
 HALF_LIFE_DAYS = 30  # a download this old counts half as much as one from today
@@ -13,6 +14,10 @@ DISMISS_WEIGHT = -0.5  # a dismissed suggestion pulls its words down by this muc
 
 _DAY = 86400
 _KINDS = (Kind.VIDEO, Kind.PLAYLIST_ITEM)
+FILE_WEIGHT = 0.5  # fetching a program says less about taste than choosing a video
+# Files that may say what someone is into. Documents and images never join: their names can be personal.
+FILE_EXTS = frozenset({".exe", ".msi", ".zip", ".7z", ".rar", ".iso", ".apk", ".dmg", ".mp4", ".mkv",
+                       ".webm"})
 
 
 @dataclass
@@ -54,10 +59,27 @@ def _recency(added_at: float, now: float) -> float:
     return 0.5 ** (age_days / HALF_LIFE_DAYS)
 
 
-def build_profile(downloads: list[Download], dismissed: list[Dismissed], now: float) -> Profile:
+def _file_doc(d: Download, now: float) -> ProfileDoc | None:
+    name = d.filename or ""
+    ext = name[name.rfind("."):].lower() if "." in name else ""
+    words = file_words(name) if ext in FILE_EXTS else []
+    if not words:
+        return None
+    title = " ".join(words)
+    return ProfileDoc(None, title, tokenize(title), FILE_WEIGHT * _recency(d.added_at, now))
+
+
+def build_profile(downloads: list[Download], dismissed: list[Dismissed], now: float,
+                  files: bool = True) -> Profile:
+    """`files`: the setting "Use file downloads for suggestions"."""
     docs: list[ProfileDoc] = []
     totals: dict[str, float] = {}
     for d in downloads:
+        if d.kind == Kind.FILE:
+            doc = _file_doc(d, now) if files else None
+            if doc is not None:
+                docs.append(doc)
+            continue
         if d.kind not in _KINDS or not d.title:
             continue
         text = f"{d.title} {d.playlist_title}" if d.playlist_title else d.title
