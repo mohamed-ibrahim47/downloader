@@ -48,7 +48,7 @@ def test_refresh_saves_candidates_and_suggestions_log_shown(rec, clock):
     assert [r[0] for r in shown] == [x.candidate.video_id for x in s] and shown[0][1] == 1
     f = json.loads(shown[0][2])
     assert set(f) == {"similarity", "boost", "affinity", "duration", "rank", "discovery", "shared", "kind",
-                      "ranker"}
+                      "ranker", "meaning"}
     assert f["ranker"] == "v1"
     assert f["similarity"] == pytest.approx(s[0].similarity) and f["rank"] == 1
 
@@ -246,7 +246,7 @@ def test_the_log_feeds_training_rows(rec, clock):
 def _model(w_similarity, active=True):
     from downloader.engine.recommend.features import NAMES
     from downloader.engine.recommend.learn import Weights
-    w = Weights(NAMES, [w_similarity] + [0.0] * 7, 0.0, [0.0] * 8, [1.0] * 8, "hand")
+    w = Weights(NAMES, [w_similarity] + [0.0] * (len(NAMES) - 1), 0.0, [0.0] * len(NAMES), [1.0] * len(NAMES), "hand")
     return {"active": active, "reason": "test", "weights": w.to_json(), "compare": {}, "report": {},
             "trained_at": 0.0}
 
@@ -320,7 +320,7 @@ def test_train_uses_the_chosen_trainer_and_compares_both(rec, clock, store, monk
 def _net_model(w_similarity):
     from downloader.engine.recommend.features import NAMES
     from downloader.engine.recommend.neural import Net
-    net = Net(NAMES, [[1.0] + [0.0] * 7], [0.0], [w_similarity], 0.0, [0.0] * 8, [1.0] * 8, "tanh", 5)
+    net = Net(NAMES, [[1.0] + [0.0] * (len(NAMES) - 1)], [0.0], [w_similarity], 0.0, [0.0] * len(NAMES), [1.0] * len(NAMES), "tanh", 5)
     return {**_model(0.0), "ranker": "v3", "net": net.to_json()}
 
 
@@ -397,3 +397,29 @@ def test_files_setting_controls_file_downloads_in_profile(rec, store):
 def test_new_settings_default_on():
     from downloader.engine.settings import Settings
     assert Settings().rec_meaning is True and Settings().rec_files is True
+
+
+def test_saved_model_with_old_inputs_is_ignored(rec, store):
+    from downloader.engine.recommend.features import NAMES
+    from downloader.engine.recommend.learn import Weights
+    old = NAMES[:8]
+    w = Weights(old, [-5.0] + [0.0] * 7, 0.0, [0.0] * 8, [1.0] * 8, "hand")  # saved by 1.4.0: 8 inputs
+    rec.refresh()  # trains, so the old model is saved after it
+    store.set_setting("rec_model", {"active": True, "ranker": "v2", "reason": "old", "weights": w.to_json(),
+                                    "compare": {}, "report": {}})
+    assert rec.ranker() == "v1"
+    assert rec.suggestions()
+
+
+def test_shown_row_logs_meaning(rec):
+    rec.refresh()
+    rec.suggestions()
+    f = json.loads(rec.store.query("SELECT features FROM rec_events WHERE event = 'shown' LIMIT 1")[0][0])
+    assert "meaning" in f
+
+
+def test_events_carry_the_title(rec):
+    rec.refresh()
+    s = rec.suggestions()
+    e = rec.log.events()[0]
+    assert len(e) == 7 and e[6] == s[0].candidate.title

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Callable
 
 from .features import from_logged
 
@@ -30,9 +31,13 @@ class Row:
     at: float
 
 
-def rows(events: list[tuple], limit: int = MAX_ROWS, open_refresh: float | None = None) -> list[Row]:
-    """`events`: (id, video_id, event, features_json, at, refresh) tuples in id order, as
-    `RecLog.events()` returns them.
+def rows(events: list[tuple], limit: int = MAX_ROWS, open_refresh: float | None = None,
+         meaning: Callable[[str, float], float] | None = None) -> list[Row]:
+    """`events`: (id, video_id, event, features_json, at, refresh, title) tuples in id order, as
+    `RecLog.events()` returns them (the title may be missing).
+
+    `meaning(title, refresh)`: when given, input 9 is recomputed with it for every row, so rows logged
+    before 1.5.0 (or with older vectors) count with the current embeddings (design v4, E7).
 
     - A download or dismissal belongs to the video's last showing before it; earlier showings count as
       scrolled past.
@@ -55,7 +60,9 @@ def rows(events: list[tuple], limit: int = MAX_ROWS, open_refresh: float | None 
         showings.setdefault(e[1], []).append(e[0])
 
     out = []
-    for eid, vid, _event, features, at, refresh in shown:
+    for e in shown:
+        eid, vid, _event, features, at, refresh = e[:6]
+        title = e[6] if len(e) > 6 else None
         nxt = next(((aid, label) for aid, label in actions.get(vid, ()) if aid > eid), None)
         if nxt is not None and not any(eid < sid < nxt[0] for sid in showings[vid]):
             label, weight = nxt[1], 1.0  # the last showing before the action
@@ -63,5 +70,8 @@ def rows(events: list[tuple], limit: int = MAX_ROWS, open_refresh: float | None 
             continue  # still on the page: no verdict yet
         else:
             label, weight = 0, IGNORED_WEIGHT
-        out.append(Row(vid, from_logged(json.loads(features)), label, weight, refresh, at))
+        x = from_logged(json.loads(features))
+        if meaning is not None:
+            x[8] = meaning(title or "", refresh)
+        out.append(Row(vid, x, label, weight, refresh, at))
     return out[-limit:]

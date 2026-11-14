@@ -11,11 +11,11 @@ import math
 from .rank import Suggestion
 
 NAMES = ["similarity", "affinity", "shared", "log_duration", "kind_channel", "kind_newest", "log_rank",
-         "discovery"]
+         "discovery", "meaning"]  # meaning: v4 (design E3), last so the old order stays
 
 
 def _vector(similarity: float, affinity: float, shared: int, duration: int | None, kind: str | None,
-            rank: int, discovery: bool) -> list[float]:
+            rank: int, discovery: bool, meaning: float = 0.0) -> list[float]:
     return [
         float(similarity),
         float(affinity),
@@ -25,20 +25,23 @@ def _vector(similarity: float, affinity: float, shared: int, duration: int | Non
         1.0 if kind == "newest" else 0.0,  # "words" (and unknown) is the base case: both 0
         math.log(max(rank, 1)),
         1.0 if discovery else 0.0,
+        float(meaning),
     ]
 
 
 def from_logged(f: dict) -> list[float]:
     """A `shown` row's features JSON (as `service._features` writes it) → the model's inputs."""
     return _vector(f.get("similarity", 0.0), f.get("affinity", 0.0), f.get("shared", 0), f.get("duration"),
-                   f.get("kind"), f.get("rank", 1), bool(f.get("discovery")))
+                   f.get("kind"), f.get("rank", 1), bool(f.get("discovery")),
+                   f.get("meaning", 0.0))
 
 
 def from_suggestion(s: Suggestion, affinity: float) -> list[float]:
     """A candidate about to be ranked → the model's inputs, at rank 1 and not the discovery pick."""
-    return _vector(s.similarity, affinity, len(s.shared), s.candidate.duration, s.candidate.kind, 1, False)
+    return _vector(s.similarity, affinity, len(s.shared), s.candidate.duration, s.candidate.kind, 1, False,
+                   s.meaning)
 
 
 def at_top(x: list[float]) -> list[float]:
     """A logged row's inputs as ranking sees them: at rank 1 (log 1 = 0) and not the discovery pick."""
-    return x[:6] + [0.0, 0.0]
+    return x[:6] + [0.0, 0.0] + x[8:]

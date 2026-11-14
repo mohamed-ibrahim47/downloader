@@ -12,7 +12,7 @@ from downloader.engine.recommend.neural import NetTrainer
 
 
 def _row(refresh, sim, aff, label, vid=None, rank=1):
-    x = [sim, aff, 0, 1.0, 0, 0, math.log(rank), 0]
+    x = [sim, aff, 0, 1.0, 0, 0, math.log(rank), 0, 0.0]
     return Row(vid or f"{refresh}-{sim}-{aff}", x, label, 1.0 if label else 0.3, float(refresh), float(refresh))
 
 

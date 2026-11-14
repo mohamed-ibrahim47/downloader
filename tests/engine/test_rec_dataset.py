@@ -84,7 +84,7 @@ def test_a_row_carries_the_models_inputs():
     log.shown("a", 1.0)
     log.act("a", "downloaded")
     r = rows(log.events)[0]
-    assert isinstance(r, Row) and len(r.x) == 8 and r.x[0] == 0.5 and r.at == 1.0
+    assert isinstance(r, Row) and len(r.x) == 9 and r.x[0] == 0.5 and r.at == 1.0
 
 
 def test_once_a_new_refresh_is_open_the_old_list_is_settled():
@@ -95,3 +95,22 @@ def test_once_a_new_refresh_is_open_the_old_list_is_settled():
     log.shown("b", 1.0)
     assert _labels(log) == []
     assert [r.video_id for r in rows(log.events, open_refresh=2.0)] == ["a", "b"]
+
+
+def test_rows_recompute_meaning_by_title_and_refresh():
+    log = Log()
+    log.shown("a", 1.0, json.dumps({**json.loads(F), "meaning": 0.9}))
+    log.shown("b", 1.0)
+    log.act("a", "downloaded")
+    log.shown("x", 2.0)
+    titled = [e + (f"title {e[1]}",) for e in log.events]
+    calls = []
+
+    def meaning(title, refresh):
+        calls.append((title, refresh))
+        return 0.25 if title == "title a" else 0.5
+
+    got = rows(titled, meaning=meaning)
+    assert [r.x[8] for r in got] == [0.25, 0.5]  # recomputed, even over a logged value
+    assert ("title a", 1.0) in calls and ("title b", 1.0) in calls
+    assert [r.x[8] for r in rows(titled)] == [0.9, 0.0]  # without a function: the logged value, or 0

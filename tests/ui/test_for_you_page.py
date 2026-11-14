@@ -250,8 +250,8 @@ def test_a_learned_ranker_shows_its_weights_and_honest_scores(qtbot, rec):
     from downloader.engine.recommend.features import NAMES
     from downloader.engine.recommend.learn import Weights
     rec.refresh()
-    hand = Weights(NAMES, [1.5] + [0.0] * 7, -2.0, [0.0] * 8, [1.0] * 8, "hand")
-    sk = Weights(NAMES, [1.49] + [0.0] * 7, -2.0, [0.0] * 8, [1.0] * 8, "sklearn")
+    hand = Weights(NAMES, [1.5] + [0.0] * (len(NAMES) - 1), -2.0, [0.0] * len(NAMES), [1.0] * len(NAMES), "hand")
+    sk = Weights(NAMES, [1.49] + [0.0] * (len(NAMES) - 1), -2.0, [0.0] * len(NAMES), [1.0] * len(NAMES), "sklearn")
     rec.store.set_setting("rec_model", {"active": True, "reason": "v2 beats v1", "weights": hand.to_json(),
                                         "compare": {"hand": hand.to_json(), "sklearn": sk.to_json()},
                                         "report": {}, "trained_at": 0.0})
@@ -267,11 +267,11 @@ def test_ranker_text_for_v3_shows_the_network_and_the_scores():
     from downloader.engine.recommend.features import NAMES
     from downloader.engine.recommend.neural import Net
     from downloader.ui.for_you_page import ranker_text
-    net = Net(NAMES, [[0.1] * 8] * 8, [0.0] * 8, [0.2] * 8, 0.0, [0.0] * 8, [1.0] * 8, "relu", 12)
+    net = Net(NAMES, [[0.1] * len(NAMES)] * 8, [0.0] * 8, [0.2] * 8, 0.0, [0.0] * len(NAMES), [1.0] * len(NAMES), "relu", 12)
     model = {"active": True, "ranker": "v3", "reason": "v3 beats v2 and v1", "net": net.to_json(), "weights": None,
              "compare": {}, "report": {"ndcg": {"baseline": 0.4, "v1": 0.58, "v2": 0.6, "v3": 0.63}}}
     text = ranker_text(model, "v3")
-    assert "Learned (v3), small neural network (8 → 8 → 1, ReLU)" in text
+    assert "Learned (v3), small neural network (9 → 8 → 1, ReLU)" in text
     assert "v1 0.58 · v2 0.60 · v3 0.63" in text
 
 

@@ -14,14 +14,14 @@ def _logged(**over):
     return f
 
 
-def test_names_are_the_designs_eight_inputs():
+def test_names_are_the_designs_nine_inputs():
     assert NAMES == ["similarity", "affinity", "shared", "log_duration", "kind_channel", "kind_newest",
-                     "log_rank", "discovery"]
+                     "log_rank", "discovery", "meaning"]
 
 
 def test_a_logged_row_becomes_numbers_in_name_order():
     x = from_logged(_logged())
-    assert x == pytest.approx([0.4, 0.5, 2, math.log(1 + 10), 1, 0, math.log(3), 0])
+    assert x == pytest.approx([0.4, 0.5, 2, math.log(1 + 10), 1, 0, math.log(3), 0, 0])
 
 
 def test_kind_is_one_hot_with_words_as_the_base():
@@ -41,9 +41,25 @@ def test_a_suggestion_is_scored_at_rank_one_and_not_as_discovery():
     c = Candidate("v", "u", "t", "Ch", 600, "q", "newest")
     s = Suggestion(c, 0.5, 0.4, 0.1, None, ["a", "b"], discovery=True)
     x = from_suggestion(s, affinity=0.5)
-    assert x == pytest.approx([0.4, 0.5, 2, math.log(11), 0, 1, 0, 0])
+    assert x == pytest.approx([0.4, 0.5, 2, math.log(11), 0, 1, 0, 0, 0])
 
 
 def test_at_top_matches_how_a_suggestion_is_scored():
     from downloader.engine.recommend.features import at_top
-    assert at_top(from_logged(_logged(rank=7, discovery=True)))[6:] == [0, 0]
+    assert at_top(from_logged(_logged(rank=7, discovery=True)))[6:8] == [0, 0]
+
+
+def test_at_top_keeps_meaning():
+    from downloader.engine.recommend.features import at_top
+    assert at_top([1, 2, 3, 4, 5, 6, 7, 8, 0.4]) == [1, 2, 3, 4, 5, 6, 0.0, 0.0, 0.4]
+
+
+def test_logged_meaning_is_read_and_missing_is_zero():
+    assert from_logged(_logged(meaning=0.7))[8] == 0.7
+    assert from_logged(_logged())[8] == 0.0
+
+
+def test_a_suggestions_meaning_is_input_nine():
+    c = Candidate("v", "u", "t", "Ch", 600, "q", "newest")
+    s = Suggestion(c, 0.5, 0.4, 0.1, None, [], meaning=0.65)
+    assert from_suggestion(s, affinity=0.5)[8] == 0.65

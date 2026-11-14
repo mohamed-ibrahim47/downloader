@@ -5,6 +5,7 @@ the local database and runs on the GUI thread.
 """
 from __future__ import annotations
 
+import json
 import random
 import threading
 import time
@@ -136,6 +137,8 @@ class Recommender:
         if not Settings.load(self.store).rec_learned:
             return None
         saved = self.model() or {}
+        if saved.get("active") and not _current_inputs(saved):
+            return None  # saved by an older version with other inputs: v1 until the next training
         if saved.get("active"):
             if saved.get("ranker") == "v3" and saved.get("net"):
                 return "v3", Net.from_json(saved["net"])
@@ -206,12 +209,22 @@ class Recommender:
         return sorted(self.log.blocked())
 
 
+def _current_inputs(saved: dict) -> bool:
+    """Was this saved model trained on today's inputs (`features.NAMES`)?"""
+    text = saved.get("net") if saved.get("ranker") == "v3" and saved.get("net") else saved.get("weights")
+    try:
+        return json.loads(text).get("names") == NAMES
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
 def _features(s: Suggestion, profile: Profile, rank_: int, ranker: str = "v1") -> dict:
     """One training row for v2 (a learned ranker): the inputs v1 used, and where it put the video."""
     return {"similarity": s.similarity, "boost": s.boost,
             "affinity": profile.channels.get(s.candidate.channel, 0.0) if s.candidate.channel else 0.0,
             "duration": s.candidate.duration, "rank": rank_, "discovery": s.discovery, "shared": len(s.shared),
-            "kind": s.candidate.kind, "ranker": ranker}
+            "kind": s.candidate.kind, "ranker": ranker,
+            "meaning": s.meaning}
 
 
 __all__ = ["REFRESH_AFTER", "Recommender", "View", "Candidate"]
