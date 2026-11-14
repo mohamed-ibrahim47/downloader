@@ -5,9 +5,11 @@
 
 The starter ranks the page until the owner's own log is big enough to train on (200 rows, 15 downloads).
 
-1. Check across months: train v2 and v3 on all of one month, rank every list with a download in another,
-   both ways round. Average the NDCG@10 per ranker.
+1. Check across months. With 3 or more: leave one out (train on all months but one, rank every list with a
+   download in the one left out, for each month in turn), which is how the starter meets a new person.
+   With 2: train on one, test on the other, both ways round. Average the NDCG@10 per ranker.
 2. Pick the starter like the real gate does: v3 if it beats v2 and v1, else v2 if it beats v1, else none.
+   v3 is judged by its mean over SEEDS random starts, since one start can be lucky.
 3. Train the pick on all months together and write it out with the check's numbers.
 
 The databases are opened read-only. Only weights and counts are written: no titles, nothing personal.
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import datetime
 import itertools
+import random
 import sqlite3
 import sys
 from pathlib import Path
@@ -27,7 +30,12 @@ from downloader.engine.recommend.dataset import rows as training_rows  # noqa: E
 from downloader.engine.recommend.evaluate import rank_lists  # noqa: E402
 from downloader.engine.recommend.features import NAMES  # noqa: E402
 from downloader.engine.recommend.learn import HandTrainer  # noqa: E402
+from downloader.engine.recommend import neural  # noqa: E402
 from downloader.engine.recommend.neural import NetTrainer  # noqa: E402
+
+# Months mix different people, not one person over time: keep every row, and shuffle (fixed seed) so the
+# rows early stopping holds back come from every month, not the last user's last days.
+neural.MAX_ROWS = 10**6
 
 OUT = ROOT / "downloader" / "engine" / "recommend" / "starter.py"
 
@@ -42,12 +50,17 @@ def load(path: str):
     return training_rows(events, open_refresh=-1.0)  # a finished month: every list is settled
 
 
-def fit(rows, ranker: str):
+SEEDS = 5  # v3's random start alone moved its NDCG from 0.49 to 0.85: judge v3 by its mean over seeds
+
+
+def fit(rows, ranker: str, seed: int = 0):
+    rows = list(rows)
+    random.Random(0).shuffle(rows)
     X, y, s = [r.x for r in rows], [r.label for r in rows], [r.weight for r in rows]
     if ranker == "v2":
         return HandTrainer().fit(NAMES, X, y, s)
-    probe = NetTrainer().fit(NAMES, X, y, s)  # held-back run: how many passes before it overfits
-    return NetTrainer(epochs=probe.epochs).fit(NAMES, X, y, s)
+    probe = NetTrainer(seed=seed).fit(NAMES, X, y, s)  # held-back run: how many passes before it overfits
+    return NetTrainer(seed=seed, epochs=probe.epochs).fit(NAMES, X, y, s)
 
 
 def main() -> None:
@@ -58,16 +71,23 @@ def main() -> None:
     for p, rows in zip(paths, months):
         print(f"{p}: {len(rows)} rows, {sum(r.label for r in rows)} downloads")
 
+    if len(months) >= 3:
+        folds = [([m for m in range(len(months)) if m != b], b) for b in range(len(months))]
+    else:
+        folds = [([a], b) for a, b in itertools.permutations(range(len(months)), 2)]
     totals: dict[str, list[float]] = {}
-    for a, b in itertools.permutations(range(len(months)), 2):
-        models = {name: fit(months[a], name) for name in ("v2", "v3")}
-        n, ndcg, _ = rank_lists(months[b], models)
-        print(f"train on month {a + 1}, test on month {b + 1} ({n} lists): "
-              + "  ".join(f"{k} {v:.3f}" for k, v in ndcg.items()))
+    for train, b in folds:
+        rows = [r for m in train for r in months[m]]
+        v2 = fit(rows, "v2")
+        runs = [rank_lists(months[b], {"v2": v2, "v3": fit(rows, "v3", seed)})[:2] for seed in range(SEEDS)]
+        n, ndcg = runs[0]
+        ndcg["v3"] = sum(r[1]["v3"] for r in runs) / SEEDS
+        print(f"train on months {[m + 1 for m in train]}, test on month {b + 1} ({n} lists): "
+              + "  ".join(f"{k} {v:.3f}" for k, v in ndcg.items()), flush=True)
         for k, v in ndcg.items():
             totals.setdefault(k, []).append(v)
     check = {k: round(sum(v) / len(v), 4) for k, v in totals.items()}
-    print("across months, mean NDCG@10:", check)
+    print(f"across months, mean NDCG@10 (v3: mean of {SEEDS} seeds):", check)
 
     if check["v3"] > check["v2"] and check["v3"] > check["v1"]:
         pick = "v3"
@@ -90,7 +110,7 @@ from __future__ import annotations
 RANKER = {pick!r}  # "v2", "v3", or None when neither beat v1 across months
 ROWS = {len(every)}
 DOWNLOADS = {sum(r.label for r in every)}
-CHECK = {check!r}  # mean NDCG@10, trained on one month and tested on another
+CHECK = {check!r}  # mean NDCG@10 on a month the model never saw
 MODEL = {model!r}
 
 

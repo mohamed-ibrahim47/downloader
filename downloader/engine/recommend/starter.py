@@ -6,9 +6,9 @@ It ranks only until the owner's own log passes the gate (200 rows, 15 downloads)
 from __future__ import annotations
 
 RANKER = None  # "v2", "v3", or None when neither beat v1 across months
-ROWS = 819
-DOWNLOADS = 99
-CHECK = {'baseline': 0.446, 'v1': 0.5407, 'v2': 0.5275, 'v3': 0.4659}  # mean NDCG@10, trained on one month and tested on another
+ROWS = 2397
+DOWNLOADS = 303
+CHECK = {'baseline': 0.4749, 'v1': 0.5714, 'v2': 0.5391, 'v3': 0.533}  # mean NDCG@10 on a month the model never saw
 MODEL = None
 
 
