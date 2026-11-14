@@ -315,3 +315,70 @@ def test_train_uses_the_chosen_trainer_and_compares_both(rec, clock, store, monk
     saved = store.get_setting("rec_model")
     assert json.loads(saved["weights"])["trainer"] == "sklearn"
     assert set(saved["compare"]) == {"hand", "sklearn"}
+
+
+def _net_model(w_similarity):
+    from downloader.engine.recommend.features import NAMES
+    from downloader.engine.recommend.neural import Net
+    net = Net(NAMES, [[1.0] + [0.0] * 7], [0.0], [w_similarity], 0.0, [0.0] * 8, [1.0] * 8, "tanh", 5)
+    return {**_model(0.0), "ranker": "v3", "net": net.to_json()}
+
+
+def test_a_v3_model_ranks_the_page_and_is_logged(rec):
+    rec.refresh()
+    v1 = [x.candidate.video_id for x in rec.suggestions()]
+    rec.store.set_setting("rec_model", _net_model(-5.0))
+    before = rec.store.query("SELECT COUNT(*) FROM rec_events WHERE event = 'shown'")[0][0]
+    rec._generation = None  # a new list, so the impressions are logged again
+    got = rec.suggestions()
+    assert [x.candidate.video_id for x in got] != v1 and all(0.0 <= x.score <= 1.0 for x in got)
+    assert rec.ranker() == "v3"
+    rows = rec.store.query("SELECT features FROM rec_events WHERE event = 'shown' ORDER BY id")
+    assert {json.loads(f)["ranker"] for (f,) in rows[before:]} == {"v3"}
+
+
+def test_the_starter_ranks_until_the_log_is_big_enough(rec, store, monkeypatch):
+    from downloader.engine.recommend import starter
+    from downloader.engine.settings import Settings
+    rec.refresh()
+    v1 = [x.candidate.video_id for x in rec.suggestions()]
+    monkeypatch.setattr(starter, "RANKER", "v2")
+    weights = _model(-5.0)["weights"]
+    monkeypatch.setattr(starter, "model", lambda: __import__(
+        "downloader.engine.recommend.learn", fromlist=["Weights"]).Weights.from_json(weights))
+    assert rec.ranker() == "starter-v2"  # a fresh log: nothing saved yet
+    assert [x.candidate.video_id for x in rec.suggestions()] != v1
+
+    store.set_setting("rec_model", {**_model(0.0, active=False), "report": {"rows": 300, "downloads": 20}})
+    assert rec.ranker() == "v1"  # the owner's own log is big enough, and v1 won on it
+
+    store.set_setting("rec_model", {**_model(0.0, active=False), "report": {"rows": 30, "downloads": 2}})
+    assert rec.ranker() == "starter-v2"
+    settings = Settings.load(store)
+    settings.rec_learned = False
+    settings.save(store)
+    assert rec.ranker() == "v1"
+
+
+def test_no_starter_means_v1(rec, monkeypatch):
+    from downloader.engine.recommend import starter
+    monkeypatch.setattr(starter, "RANKER", None)
+    assert rec.ranker() == "v1"
+
+
+def test_train_saves_the_net_when_v3_wins(rec, clock, store, monkeypatch):
+    from downloader.engine.recommend import evaluate
+    monkeypatch.setattr(evaluate, "choose", lambda rep: ("v3", "v3 beats v2 and v1"))
+    for _ in range(3):
+        rec.refresh()
+        s = rec.suggestions()
+        rec.dismiss(s[1])
+        store.add(Download(url="u", kind=Kind.VIDEO, filename="f", folder="d", title=s[0].candidate.title,
+                           channel=s[0].candidate.channel, video_id=s[0].candidate.video_id))
+        rec.suggestions()
+        clock.now += 7 * 3600
+    rec.train()
+    saved = store.get_setting("rec_model")
+    assert saved["active"] and saved["ranker"] == "v3" and saved["net"]
+    assert "v3" in saved["report"]["ndcg"] and saved["report"]["v3_epochs"] >= 1
+    assert rec.ranker() == "v3"

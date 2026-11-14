@@ -13,17 +13,18 @@ from dataclasses import dataclass, field
 from .. import youtube
 from ..settings import Settings
 from ..store import Store
-from . import evaluate
+from . import evaluate, starter
 from .candidates import Candidate, fetch, keep, plan
 from .dataset import rows as training_rows
 from .features import NAMES, from_suggestion
 from .learn import Weights, available_trainers, trainer
+from .neural import Net, NetTrainer
 from .log import RecLog
 from .profile import Profile, build_profile
 from .rank import TOP_K, Suggestion, build_model, profile_words, rank
 
 REFRESH_AFTER = 6 * 3600  # seconds: opening the page searches again only when the cache is older
-MODEL_KEY = "rec_model"  # settings key: the latest training, its evaluation, and whether v2 is on
+MODEL_KEY = "rec_model"  # settings key: the latest training, its evaluation, and which ranker is on
 
 
 @dataclass
@@ -85,13 +86,14 @@ class Recommender:
         finally:
             self._refreshing.release()
 
-    # ---- the learned ranker (v2) ---------------------------------------------------
+    # ---- the learned rankers (v2, v3, the starter) -------------------------------------
 
     def train(self) -> None:
-        """Train on the log, measure against v1, and save the result with the gate's verdict. Blocking.
+        """Train v2 and v3 on the log, measure them against v1, and save which one should rank. Blocking.
 
         Runs after each refresh (in the pool) and when the owner picks another trainer. Also trains every
-        installed trainer on all rows, so the page can show their weights side by side.
+        installed v2 trainer on all rows, so the page can show their weights side by side. v3's final net is
+        trained on all rows only when it won, for the number of passes its held-back run found.
         """
         with self._training:
             settings = Settings.load(self.store)
@@ -99,33 +101,54 @@ class Recommender:
             chosen = trainer(settings.rec_trainer)
             try:
                 rep = evaluate.evaluate(rows, chosen)
-                on, why = evaluate.gate(rep)
-                compare = {}
+                ranker, why = evaluate.choose(rep)
+                compare, net = {}, None
                 if len({r.label for r in rows}) == 2:  # a yes and a no: something to learn
                     X, y, w = [r.x for r in rows], [r.label for r in rows], [r.weight for r in rows]
                     compare = {name: trainer(name).fit(NAMES, X, y, w).to_json() for name in available_trainers()}
+                    if ranker == "v3" and rep.net is not None:
+                        net = NetTrainer(epochs=rep.net.epochs).fit(NAMES, X, y, w).to_json()
             except Exception as e:  # a training bug must never take the page down: v1 keeps ranking
-                rep, on, why, compare = evaluate.Report(len(rows), 0), False, f"Training failed: {e}", {}
+                rep, ranker, why, compare, net = evaluate.Report(len(rows), 0), "v1", f"Training failed: {e}", {}, None
             final = compare.get(chosen.name)
+            if (ranker == "v2" and final is None) or (ranker == "v3" and net is None):
+                ranker = "v1"
             self.store.set_setting(MODEL_KEY, {
-                "active": on and final is not None, "reason": why, "weights": final, "compare": compare,
+                "active": ranker != "v1", "ranker": ranker, "reason": why, "weights": final, "net": net,
+                "compare": compare,
                 "report": {"rows": rep.rows, "downloads": rep.downloads, "test_lists": rep.test_lists,
-                           "ndcg": rep.ndcg, "hit3": rep.hit3, "auc": rep.auc, "log_loss": rep.log_loss},
+                           "ndcg": rep.ndcg, "hit3": rep.hit3, "auc": rep.auc, "log_loss": rep.log_loss,
+                           "v3_auc": rep.v3_auc, "v3_log_loss": rep.v3_log_loss,
+                           "v3_epochs": rep.net.epochs if rep.net else 0},
                 "trained_at": self._clock()})
 
     def model(self) -> dict | None:
         """The latest training, as saved: for the "Why this order?" view."""
         return self.store.get_setting(MODEL_KEY)
 
-    def _learned(self) -> Weights | None:
-        """The model that ranks the page, or None when v1 does (gate not passed, or the setting is off)."""
-        saved = self.model()
-        if not saved or not saved.get("active") or not Settings.load(self.store).rec_learned:
+    def _learned(self) -> tuple[str, Weights | Net] | None:
+        """The ranker that ranks the page and its model, or None when v1 does (design v3, D4).
+
+        The owner's own trained model when it passed the gate; else the starter while their log is still too
+        small to judge; else v1. The setting off means v1, always.
+        """
+        if not Settings.load(self.store).rec_learned:
             return None
-        return Weights.from_json(saved["weights"])
+        saved = self.model() or {}
+        if saved.get("active"):
+            if saved.get("ranker") == "v3" and saved.get("net"):
+                return "v3", Net.from_json(saved["net"])
+            return "v2", Weights.from_json(saved["weights"])  # saved by 1.3.0 (no "ranker") is v2 too
+        report = saved.get("report") or {}
+        small = report.get("rows", 0) < evaluate.MIN_ROWS or report.get("downloads", 0) < evaluate.MIN_DOWNLOADS
+        if small and starter.RANKER:
+            return f"starter-{starter.RANKER}", starter.model()
+        return None
 
     def ranker(self) -> str:
-        return "v2" if self._learned() is not None else "v1"
+        """"v1", "v2", "v3", "starter-v2" or "starter-v3"."""
+        learned = self._learned()
+        return learned[0] if learned else "v1"
 
     def view(self, k: int = TOP_K, words: int = 0, log: bool = True) -> View:
         """Suggestions (and, if asked, the profile's top `words`) from one read of the downloads."""
@@ -141,11 +164,12 @@ class Recommender:
         self._start_generation()
         model = build_model(profile, cands)
         learned = self._learned()
-        scorer = (lambda s, affinity: learned.prob(from_suggestion(s, affinity))) if learned else None
+        name, m = learned if learned else ("v1", None)
+        scorer = (lambda s, affinity: m.prob(from_suggestion(s, affinity))) if m is not None else None
         picks = rank(profile, cands, k, self._rng, discovery_id=self._discovery, model=model, scorer=scorer)
         self._discovery = next((s.candidate.video_id for s in picks if s.discovery), self._discovery)
         if log:
-            self._log_shown(picks, profile, "v2" if learned else "v1")
+            self._log_shown(picks, profile, name)
         return View(True, picks, profile_words(profile, cands, words, model=model) if words else [])
 
     def _start_generation(self) -> None:
