@@ -97,6 +97,27 @@ class Report:
     v3_log_loss: float = 0.0
 
 
+def rank_lists(rows: list[Row], models: dict) -> tuple[int, dict[str, float], dict[str, float]]:
+    """Reorder each list in `rows` that has a download with every ranker `models` allows, and score the orders.
+
+    `models` holds the trained "v2" and/or "v3"; rankers without a model are skipped. Returns the number of
+    lists judged, and the mean NDCG@10 and hit rate@3 per ranker.
+    """
+    lists: dict[float, list[Row]] = {}
+    for r in rows:
+        lists.setdefault(r.refresh, []).append(r)
+    judged = [rs for rs in lists.values() if any(r.label for r in rs)]
+    ndcg, hit3 = {}, {}
+    for name, score in RANKERS.items():
+        if name in ("v2", "v3") and name not in models:
+            continue
+        # Ties go by video id: neutral, and not v1's order, which would favour v1.
+        orders = [[r.label for r in sorted(rs, key=lambda r: (-score(r, models), r.video_id))] for rs in judged]
+        ndcg[name] = sum(map(ndcg_at, orders)) / len(orders) if orders else 0.0
+        hit3[name] = sum(map(hit_at, orders)) / len(orders) if orders else 0.0
+    return len(judged), ndcg, hit3
+
+
 def evaluate(rows: list[Row], trainer, net_trainer: NetTrainer | None = None) -> Report:
     rep = Report(len(rows), sum(r.label for r in rows))
     train, test = split(rows)
@@ -107,17 +128,7 @@ def evaluate(rows: list[Row], trainer, net_trainer: NetTrainer | None = None) ->
     net = (net_trainer or NetTrainer()).fit(NAMES, [r.x for r in train], [r.label for r in train],
                                             [r.weight for r in train])
     rep.net = net
-    models = {"v2": m, "v3": net}
-    lists: dict[float, list[Row]] = {}
-    for r in test:
-        lists.setdefault(r.refresh, []).append(r)
-    judged = [rs for rs in lists.values() if any(r.label for r in rs)]
-    rep.test_lists = len(judged)
-    for name, score in RANKERS.items():
-        # Ties go by video id: neutral, and not v1's order, which would favour v1.
-        orders = [[r.label for r in sorted(rs, key=lambda r: (-score(r, models), r.video_id))] for rs in judged]
-        rep.ndcg[name] = sum(map(ndcg_at, orders)) / len(orders) if orders else 0.0
-        rep.hit3[name] = sum(map(hit_at, orders)) / len(orders) if orders else 0.0
+    rep.test_lists, rep.ndcg, rep.hit3 = rank_lists(test, {"v2": m, "v3": net})
     probs = [m.prob(at_top(r.x)) for r in test]
     rep.auc = auc(probs, [r.label for r in test])
     rep.log_loss = log_loss([m.prob(r.x) for r in test], [r.label for r in test], [r.weight for r in test])
