@@ -57,3 +57,16 @@ def test_meaning_zero_for_unknown_title():
 def test_v4_score_equals_v1_at_mix_zero():
     assert v4_score(0.3, 0.9, 0.5, 0.0) == pytest.approx(0.3 + CHANNEL_BOOST * 0.5)
     assert v4_score(0.3, 0.9, 0.5, 0.5) == pytest.approx(0.6 + CHANNEL_BOOST * 0.5)
+
+
+def test_score_is_memoised_per_title():
+    from downloader.engine.recommend.embed import Vectors
+    from downloader.engine.recommend.meaning import MeaningIndex
+    from downloader.engine.recommend.profile import Profile, ProfileDoc
+    v = Vectors(["a", "b"], [[1.0, 0.0], [0.0, 1.0]], [1, 1])
+    idx = MeaningIndex(Profile([ProfileDoc("1", "a", ["a"], 1.0)], {}), v, {})
+    calls = []
+    real = v.title_vector
+    v.title_vector = lambda *a: calls.append(1) or real(*a)
+    assert idx.score(["a"]) == idx.score(["a"]) == pytest.approx(1.0)
+    assert len(calls) == 1

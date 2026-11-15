@@ -7,7 +7,7 @@ guitar cover matches the music downloads very well.
 """
 from __future__ import annotations
 
-from .embed import Vectors, cosine
+from .embed import Vectors
 from .profile import Profile
 from .rank import CHANNEL_BOOST
 
@@ -19,6 +19,7 @@ class MeaningIndex:
         self.vectors = vectors
         self.idf = idf
         self._docs: list[tuple[list[float], float]] = []
+        self._memo: dict[tuple[str, ...], float] = {}  # one candidate is scored at every draw
         for d in profile.docs:
             v = vectors.title_vector(d.tokens, idf)
             if v is not None and d.weight != 0:
@@ -27,12 +28,18 @@ class MeaningIndex:
     def score(self, tokens: list[str]) -> float:
         """Mean of the best MEANING_TOP positive matches with liked downloads, plus the strongest pull-down
         from a dismissed title close to it. 0 when the title has no known word."""
+        key = tuple(tokens)
+        if key not in self._memo:
+            self._memo[key] = self._score(tokens)
+        return self._memo[key]
+
+    def _score(self, tokens: list[str]) -> float:
         v = self.vectors.title_vector(tokens, self.idf)
         if v is None:
             return 0.0
         liked, against = [], 0.0
         for dv, w in self._docs:
-            c = cosine(v, dv)
+            c = sum(a * b for a, b in zip(v, dv))  # title vectors have length 1: the dot product is the cosine
             if w > 0:
                 if c * w > 0:
                     liked.append(c * w)

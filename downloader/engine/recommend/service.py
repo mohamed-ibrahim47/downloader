@@ -53,6 +53,7 @@ class Recommender:
         self._refreshing = threading.Lock()
         self._training = threading.Lock()
         self._retraining = threading.Lock()
+        self._meaning_cache: tuple | None = None  # (vectors, key, MeaningIndex), see _meaning_index
         self._vectors: embed.Vectors | None = None
         self._vectors_loaded = False
         # Per refresh (GUI thread only): videos already logged as shown, and the discovery pick.
@@ -298,7 +299,7 @@ class Recommender:
         model = build_model(profile, cands)
         name, m = self._learned()
         vectors = self.vectors() if Settings.load(self.store).rec_meaning else None
-        index = MeaningIndex(profile, vectors, model.idf) if vectors is not None else None
+        index = self._meaning_index(profile, cands, vectors, model.idf) if vectors is not None else None
         if m is not None:
             scorer = lambda s, affinity: m.prob(from_suggestion(s, affinity))  # noqa: E731
         elif name == "v4":
@@ -315,6 +316,19 @@ class Recommender:
         if log:
             self._log_shown(picks, profile, name)
         return View(True, picks, profile_words(profile, cands, words, model=model) if words else [])
+
+    def _meaning_index(self, profile: Profile, cands, vectors: embed.Vectors, idf) -> MeaningIndex:
+        """The meaning index, built again only when the downloads, dismissals, candidates or vectors change.
+
+        view() runs on the GUI thread at every draw; scoring every candidate against every download each time
+        took about a second with 500 downloads. Weights are rounded: recency fades over days, not seconds.
+        """
+        key = (tuple((d.title, d.from_file, round(d.weight, 2)) for d in profile.docs),
+               tuple(c.video_id for c in cands))
+        cached = self._meaning_cache
+        if cached is None or cached[0] is not vectors or cached[1] != key:
+            cached = self._meaning_cache = (vectors, key, MeaningIndex(profile, vectors, idf))
+        return cached[2]
 
     def _start_generation(self) -> None:
         """A new refresh means a new list: forget what was logged and the old discovery pick."""

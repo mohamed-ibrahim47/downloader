@@ -568,3 +568,20 @@ def test_refresh_does_not_retrain_vectors(rec, store, with_starter):
     rec.train()
     assert rec.vectors_meta()["source"] == "starter"
     assert rec.retrain_vectors() is True
+
+
+def test_meaning_index_is_reused_between_draws(rec, with_starter, monkeypatch):
+    """view() runs on the GUI thread at every draw, dismissal and Why toggle: the meaning index is built
+    again only when what it depends on changes (final review, finding 3)."""
+    from downloader.engine.recommend import service
+    built = []
+    real = service.MeaningIndex
+    monkeypatch.setattr(service, "MeaningIndex", lambda *a: built.append(1) or real(*a))
+    rec.refresh()
+    first = rec.suggestions()
+    rec.suggestions()
+    rec.view(words=5)
+    assert len(built) == 1
+    rec.dismiss(first[0])
+    after = rec.suggestions()
+    assert len(built) == 2 and first[0].candidate.video_id not in {s.candidate.video_id for s in after}
