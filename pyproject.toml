@@ -33,5 +33,6 @@ include = ["downloader*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["network: hits the internet (run with RUN_NETWORK=1)"]
+markers = ["network: hits the internet (run with RUN_NETWORK=1)",
+           "real_starter: keep the shipped starter word vectors (other tests run without them)"]
 qt_api = "pyside6"

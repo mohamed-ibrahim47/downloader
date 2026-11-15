@@ -166,3 +166,16 @@ def http_server():
     server = TestServer()
     yield server
     server.close()
+
+
+@pytest.fixture(autouse=True)
+def _no_starter_vectors(request, monkeypatch):
+    """Tests run without the shipped starter vectors, so v1's behaviour stays what they check.
+
+    v4 tests patch in small vectors of their own; `@pytest.mark.real_starter` keeps the shipped ones.
+    """
+    if request.node.get_closest_marker("real_starter"):
+        return
+    from downloader.engine.recommend import starter_vectors
+    monkeypatch.setattr(starter_vectors, "vectors", lambda: None)
+    monkeypatch.setattr(starter_vectors, "DEFAULT_ON", False)

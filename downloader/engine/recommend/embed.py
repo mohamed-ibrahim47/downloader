@@ -18,10 +18,10 @@ from collections import Counter
 DIM = 32
 WINDOW = 3  # words each side; titles are short
 NEGATIVES = 5  # random "not neighbours" per real pair
-SUBSAMPLE = 1e-4  # very frequent words are skipped now and then, so "official" and "video" don't dominate
+SUBSAMPLE = 1e-3  # very frequent words are skipped now and then (1e-4 threw away too much of a small corpus)
 LR = 0.025
 LR_MIN = 0.0001
-STARTER_EPOCHS = 5
+STARTER_EPOCHS = 15  # 5 left the vectors noisy on ~170k words (v4 0.56 vs v1 0.57); 15 gave 0.65
 RETRAIN_EPOCHS = 3
 STARTER_MIN_COUNT = 5
 USER_MIN_COUNT = 2
