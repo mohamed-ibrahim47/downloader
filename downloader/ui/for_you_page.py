@@ -288,6 +288,9 @@ class ForYouPage(QWidget):
         self._busy = False
         self.offline = False
         self._finish()
+        # The word vectors retrain on their own clock (every 300 new titles) and take minutes: after the list
+        # is up, as a task of their own, so the page is never held on "Looking for new videos...".
+        run_in_pool(self._rec.retrain_vectors)
 
     def _on_failed(self, token, message: str) -> None:
         if token != self._token:

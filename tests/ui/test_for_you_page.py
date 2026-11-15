@@ -379,3 +379,14 @@ def test_no_ndcg_line_before_any_test_list():
     model = {"active": False, "ranker": "v4", "reason": "Learning: 0 of 100 rows", "compare": {},
              "report": {"test_lists": 0, "ndcg": {"v1": 0.0, "v4": 0.0}}}
     assert "NDCG" not in ranker_text(model, "v4", {"source": "starter", "words": 8000})
+
+
+def test_vectors_retrain_after_the_list_is_up(qtbot, rec, monkeypatch):
+    order = []
+    real = rec.refresh
+    monkeypatch.setattr(rec, "refresh", lambda: (real(), order.append("refresh")))
+    monkeypatch.setattr(rec, "retrain_vectors", lambda: order.append("retrain") or False)
+    page = _page(qtbot, rec); page.open()
+    qtbot.waitUntil(lambda: page.state == "list")
+    qtbot.waitUntil(lambda: "retrain" in order)
+    assert order == ["refresh", "retrain"]

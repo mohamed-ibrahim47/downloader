@@ -558,3 +558,13 @@ def test_nearest_words_for_profile(rec, with_starter):
     rec.refresh()
     got = dict(rec.nearest_words(5, 2))
     assert got["blank"] == ["space", "style"]
+
+
+def test_refresh_does_not_retrain_vectors(rec, store, with_starter):
+    """The word2vec retrain takes minutes in pure Python: it runs as its own task after the list is up, not
+    inside refresh/train, which would keep the page on "Looking for new videos..." (final review, finding 2)."""
+    _add_titles(store, 300)
+    rec.refresh()
+    rec.train()
+    assert rec.vectors_meta()["source"] == "starter"
+    assert rec.retrain_vectors() is True

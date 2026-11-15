@@ -139,7 +139,6 @@ class Recommender:
                            "v3_auc": rep.v3_auc, "v3_log_loss": rep.v3_log_loss,
                            "v3_epochs": rep.net.epochs if rep.net else 0},
                 "trained_at": self._clock()})
-        self.retrain_vectors()  # on its own clock: only after RETRAIN_EVERY new titles
 
     # ---- the word vectors (v4) ---------------------------------------------------------
 
@@ -167,7 +166,8 @@ class Recommender:
         return sorted(titles)
 
     def retrain_vectors(self) -> bool:
-        """Train the vectors again on the owner's own titles, starting from the current ones. Blocking.
+        """Train the vectors again on the owner's own titles, starting from the current ones. Blocking: minutes
+        in pure Python, so the page runs it as its own pool task after a refresh, never inside one.
 
         Runs only when RETRAIN_EVERY new titles have been seen since the last time, never twice at once, and
         a failure keeps the old vectors. True when it trained.
