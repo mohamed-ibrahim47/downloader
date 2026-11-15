@@ -151,11 +151,25 @@ which ranking is on, how far learning has got, and what the model learned. Runni
 `pip install -e .[ml]` adds scikit-learn as a second trainer, so you can compare its weights with
 the hand-written one; the .exe uses the hand-written trainer only.
 
-Next to it trains a small neural network (8 inputs → 8 hidden neurons → 1, ReLU), also by hand with
+Next to it trains a small neural network (9 inputs → 8 hidden neurons → 1, ReLU), also by hand with
 backpropagation. It can learn combinations the first model can't ("long videos are fine from this
 channel"), but it needs more data, so it takes over only when it beats both other rankings on your
 lists. With equal results, the simpler model stays on. `scripts/rec_eval.py --activation tanh`
 compares activations on the same data.
+
+**Match by meaning.** Word matching thinks "piano cover" and "acoustic version" have nothing in
+common. So the app also has its own word embeddings: every word gets 32 numbers, learned by a
+hand-written word2vec from which words appear together in video titles. Words used the same way end
+up close, and a suggestion is scored by how close it is to your three nearest downloads. The app
+ships with vectors trained on about 21,800 public YouTube titles, and retrains them on the titles
+you see every 300 new ones, all on your PC. Meaning only ranks the page when it beats word matching
+in a test; a banner says when it starts, and **Why this order?** shows the nearest words it learned
+(`lion → leopard, hunt, …`). Turn it off with **Match by meaning** in Settings.
+
+Programs, archives and course videos you download count too, at half the weight of a video: a
+downloaded `blender-4.2-windows-x64.msi` brings up Blender tutorials. Only the cleaned name is used
+("blender"), and documents and pictures never count. **Use file downloads for suggestions** in
+Settings turns this off.
 
 ## Install
 
@@ -200,7 +214,7 @@ powershell -File scripts\build_exe.ps1   # set DOWNLOADER_BUILD to choose the ou
 | Part | What it does |
 |---|---|
 | `downloader/engine` | Plain Python, no Qt: link detection, multi-connection HTTP downloads with resume, the queue, the scheduler, YouTube through yt-dlp, and a SQLite store. |
-| `downloader/engine/recommend` | The For you recommender, plain Python with no ML library: words, hand-written TF-IDF, a profile that fades with age, YouTube search queries, ranking with reasons, a SQLite log of what was shown and what you did with it, and two learned rankers trained on that log (logistic regression and a small neural network). |
+| `downloader/engine/recommend` | The For you recommender, plain Python with no ML library: words, hand-written TF-IDF, a profile that fades with age, YouTube search queries, ranking with reasons, a SQLite log of what was shown and what you did with it, two learned rankers trained on that log (logistic regression and a small neural network), and hand-written word2vec embeddings for matching by meaning. |
 | `downloader/ui` | PySide6 window. A controller turns the engine's background-thread events into Qt signals, so the window never waits on the network. |
 | `scripts/` | Building the `.exe` (PyInstaller) and drawing the app icon. |
 
