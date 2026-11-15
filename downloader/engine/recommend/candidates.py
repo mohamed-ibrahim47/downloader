@@ -45,16 +45,17 @@ def plan(profile: Profile, blocked: set[str] | frozenset[str] = frozenset()) -> 
     favourites, so a new interest never reached YouTube (seen in the month-long simulation).
     Pairs come from the title only: tags are often SEO filler, and these words are sent to YouTube.
     Each search comes with its kind ("channel", "newest" or "words"), which the learning log keeps.
+    File downloads never make a search: a file name can carry a person's name ("Ahmed_Hassan_Wedding.mp4"),
+    and no word filter can tell that from "blender". They still count in the ranking and in meaning.
     """
     liked_channels = [name for name in profile.channels if name not in blocked]
     channels = sorted(liked_channels, key=lambda name: -profile.channels[name])[:CHANNEL_QUERIES]
-    liked_docs = [d for d in profile.docs if d.weight > 0]
+    liked_docs = [d for d in profile.docs if d.weight > 0 and not d.from_file]
     liked = [(tokenize(d.title), d.weight) for d in liked_docs]
     idf = fit_idf([words for words, _ in liked])
     out = [(name, "channel") for name in channels]
     texts = set(channels)
-    # By date, not weight: a file counts half (FILE_WEIGHT) but a program fetched today is still the newest.
-    # Without dates (old tests, hand-built profiles) the highest weight is the newest.
+    # By date, then weight. Without dates (old tests, hand-built profiles) the highest weight is the newest.
     order = max(range(len(liked)), key=lambda i: (liked_docs[i].added_at, liked[i][1]), default=None)
     newest = liked[order] if order is not None else None
     if newest and newest[0]:

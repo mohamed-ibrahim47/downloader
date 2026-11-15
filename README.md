@@ -166,10 +166,10 @@ you see every 300 new ones, all on your PC. Meaning only ranks the page when it 
 in a test; a banner says when it starts, and **Why this order?** shows the nearest words it learned
 (`lion → leopard, hunt, …`). Turn it off with **Match by meaning** in Settings.
 
-Programs, archives and course videos you download count too, at half the weight of a video: a
-downloaded `blender-4.2-windows-x64.msi` brings up Blender tutorials. Only the cleaned name is used
-("blender"), and documents and pictures never count. **Use file downloads for suggestions** in
-Settings turns this off.
+Programs, archives and course videos you download count too, at half the weight of a video: after
+`blender-4.2-windows-x64.msi`, Blender videos that turn up rank higher. Only the cleaned name is used
+("blender"), it is never sent to YouTube (a file name can carry a person's name), and documents and
+pictures never count. **Use file downloads for suggestions** in Settings turns this off.
 
 ## Install
 

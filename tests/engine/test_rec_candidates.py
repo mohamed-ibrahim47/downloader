@@ -88,23 +88,30 @@ def test_fetch_tags_each_candidate_with_its_search_kind():
     assert fetch(["plain"], lambda q, limit: [hit])[0].kind is None  # a bare query has no kind
 
 
-def test_newest_file_download_searches_its_words():
-    from downloader.engine.models import Download, Kind
-    from downloader.engine.recommend.profile import build_profile
-    now = 1_800_000_000.0
-    old = [Download(url="u", kind=Kind.VIDEO, filename="f", folder="d", title=t, added_at=now - 90 * 86400)
-           for t in ("piano cover song", "guitar chords lesson")]
-    f = Download(url="u", kind=Kind.FILE, filename="Blender_3D_Modeling-4.2-x64.msi", folder="d", added_at=now)
-    qs = plan(build_profile(old + [f], [], now))
-    assert ("modeling" in qs[0][0] or "blender" in qs[0][0]) and qs[0][1] == "newest"
-
-
-def test_newest_is_by_date_so_a_fresh_file_beats_a_day_old_video():
+def test_file_names_never_reach_a_youtube_search():
+    """A file name can carry a person's name (a wedding video, a CV in a zip): file downloads shape the
+    ranking, but never what is sent to YouTube (final review, finding 1)."""
     from downloader.engine.models import Download, Kind
     from downloader.engine.recommend.profile import build_profile
     now = 1_800_000_000.0
     vids = [Download(url="u", kind=Kind.VIDEO, filename="f", folder="d", title=t, added_at=now - 86400)
-            for t in ("piano cover song", "guitar chords lesson")]
-    f = Download(url="u", kind=Kind.FILE, filename="Blender_3D_Modeling-4.2-x64.msi", folder="d", added_at=now)
-    newest = [q for q, kind in plan(build_profile(vids + [f], [], now)) if kind == "newest"]
-    assert newest == ["blender modeling"]
+            for t in ("piano cover song", "guitar chords lesson", "jazz piano live")]
+    files = [Download(url="u", kind=Kind.FILE, filename=n, folder="d", added_at=now)
+             for n in ("Ahmed_Hassan_Wedding.mp4", "JohnSmith_Resume.zip", "Blender_3D_Modeling-4.2-x64.msi")]
+    p = build_profile(vids + files, [], now)
+    assert any(d.title.startswith("ahmed") for d in p.docs)  # still in the profile, for ranking
+    sent = " ".join(q for q, _kind in plan(p))
+    for word in ("ahmed", "hassan", "wedding", "john", "smith", "resume", "blender", "modeling"):
+        assert word not in sent
+    newest = [q for q, kind in plan(p) if kind == "newest"]
+    video_words = {"piano", "cover", "song", "guitar", "chords", "lesson", "jazz", "live"}
+    assert newest and set(newest[0].split()) <= video_words  # the newest *video* instead
+
+
+def test_only_files_means_no_searches_from_downloads():
+    from downloader.engine.models import Download, Kind
+    from downloader.engine.recommend.profile import build_profile
+    now = 1_800_000_000.0
+    files = [Download(url="u", kind=Kind.FILE, filename=n, folder="d", added_at=now)
+             for n in ("Blender_3D_Modeling.msi", "krita_painting.exe", "python_course_week1.mp4")]
+    assert plan(build_profile(files, [], now)) == []

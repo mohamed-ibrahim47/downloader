@@ -27,6 +27,7 @@ class ProfileDoc:
     tokens: list[str]
     weight: float
     added_at: float = 0.0  # when it was downloaded (0 for dismissals): "newest" goes by this
+    from_file: bool = False  # a file download: it shapes the ranking but is never sent to YouTube
 
 
 @dataclass
@@ -67,7 +68,8 @@ def _file_doc(d: Download, now: float) -> ProfileDoc | None:
     if not words:
         return None
     title = " ".join(words)
-    return ProfileDoc(None, title, tokenize(title), FILE_WEIGHT * _recency(d.added_at, now), d.added_at)
+    return ProfileDoc(None, title, tokenize(title), FILE_WEIGHT * _recency(d.added_at, now), d.added_at,
+                      from_file=True)
 
 
 def build_profile(downloads: list[Download], dismissed: list[Dismissed], now: float,
