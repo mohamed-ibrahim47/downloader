@@ -93,3 +93,12 @@ def test_propensity_does_not_shift_the_callers_rng_by_its_draws():
     ref = random.Random(5)
     ref.random()
     assert rng.random() == ref.random()
+
+
+def test_propensity_is_never_zero_for_the_card_really_picked():
+    # A pick with a tiny chance can miss in all 200 repeats; the real draw counts as one, so it is > 0
+    # (off-policy evaluation divides by it later).
+    never = lambda p, r: (p[1], {})  # noqa: E731 — the repeats always pick the other card
+    pool = [sugg("c", "channel"), sugg("n", "newest")]
+    got = propensity(never, pool, "c", random.Random(0))
+    assert 0 < got <= 1 / 200

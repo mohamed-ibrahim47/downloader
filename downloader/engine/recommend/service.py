@@ -60,6 +60,7 @@ class Recommender:
         self._meaning_cache: tuple | None = None  # (vectors, key, MeaningIndex), see _meaning_index
         self._vectors: embed.Vectors | None = None
         self._vectors_loaded = False
+        self._arms_cache: tuple | None = None  # (key, arms), see _arms
         # Per refresh (GUI thread only): videos already logged as shown, and the discovery pick.
         self._generation: float | None = None
         self._logged: set[str] = set()
@@ -157,10 +158,18 @@ class Recommender:
 
     # ---- the discovery card (v5) -------------------------------------------------------
 
-    def _arms(self, events=None) -> dict:
-        """The source bandit's arms from the settled discovery rows."""
-        events = self.log.events() if events is None else events
-        return arm_stats(training_rows(events, open_refresh=self.log.last_refresh()), self._clock())
+    def _arms(self) -> dict:
+        """The source bandit's arms from the settled discovery rows.
+
+        Runs on the GUI thread, at every draw and every render with "Why this order?" ticked, and reading the
+        whole log took tenths of a second on a big one. So the result is kept until the log gets a new event,
+        a new refresh starts, or an hour passes (fading moves that slowly)."""
+        newest = self.store.query("SELECT MAX(id) FROM rec_events")[0][0]
+        key = (newest, self.log.last_refresh(), int(self._clock() // 3600))
+        if self._arms_cache is None or self._arms_cache[0] != key:
+            rows = training_rows(self.log.events(), open_refresh=self.log.last_refresh())
+            self._arms_cache = (key, arm_stats(rows, self._clock()))
+        return self._arms_cache[1]
 
     def _posterior(self) -> Posterior:
         """The saved contextual posterior; raises when there is none or it was trained on other inputs."""

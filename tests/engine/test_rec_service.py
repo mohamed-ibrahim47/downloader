@@ -713,3 +713,19 @@ def test_discovery_info_reports_mode_arms_and_pick(rec, store):
     assert info["pick"]["video_id"] == card.candidate.video_id and info["pick"]["picker"] == "source"
     assert info["pick"]["draws"] and info["posterior"] is not None and info["error"] is None
     assert store.get_setting(PICK_KEY)["refresh"] == rec.log.last_refresh()
+
+
+def test_arms_are_not_recomputed_while_the_log_is_unchanged(rec, monkeypatch):
+    # discovery_info() runs on every render with "Why this order?" ticked: reading the whole log each time
+    # froze the GUI on a big log.
+    rec.refresh()
+    rec.suggestions()
+    reads = []
+    real = rec.log.events
+    monkeypatch.setattr(rec.log, "events", lambda: reads.append(1) or real())
+    first = rec.discovery_info()["arms"]
+    rec.discovery_info()
+    assert len(reads) == 1
+    rec.dismiss(_disc(rec.suggestions()))  # a new event: the arms must see it
+    rec.discovery_info()
+    assert len(reads) >= 2 and set(first) == {"channel", "newest", "words"}

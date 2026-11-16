@@ -116,6 +116,10 @@ def propensity(pick_fn, pool: list[Suggestion], chosen_id: str, rng: random.Rand
     Logged with each pick for off-policy evaluation later ("how would another mode have done?"), which
     needs the probability of every logged pick. The draws use their own rng, seeded once from `rng`, so
     the caller's sequence moves by one number, not by n draws.
+
+    The real draw that picked `chosen_id` counts as one more sample: (hits + 1) / (n + 1). A card with a
+    tiny chance can miss in all n repeats, and a logged 0 would break that later evaluation (it divides by
+    the propensity), although the card was in fact picked.
     """
     own = random.Random(rng.random())
     hits = 0
@@ -125,4 +129,4 @@ def propensity(pick_fn, pool: list[Suggestion], chosen_id: str, rng: random.Rand
             got = got[0]
         if got is not None and got.candidate.video_id == chosen_id:
             hits += 1
-    return hits / n
+    return (hits + 1) / (n + 1)
