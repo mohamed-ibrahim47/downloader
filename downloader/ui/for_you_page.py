@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea,
                                QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
+from ..engine.recommend.bandit import ARMS
 from ..engine.recommend.embed import DIM
 from ..engine.recommend.learn import Weights
 from ..engine.recommend.neural import Net
@@ -108,6 +109,37 @@ def ranker_text(model: dict | None, ranker: str, vectors_meta: dict | None = Non
         first = compare[names[0]]
         for i, feature in enumerate(first.names):
             lines.append(f"  {feature}  " + " / ".join(f"{compare[n].w[i]:+.2f}" for n in names))
+    return "\n".join(lines)
+
+
+def discovery_text(info: dict) -> str:
+    """The Discovery block of "Why this order?": who picks card 5, and what it has learned (design v5, V4)."""
+    mode, pick = info.get("mode"), info.get("pick") or {}
+    lines = []
+    if mode == "source":
+        lines.append("Discovery card: learns which search works")
+        draws = pick.get("draws") or {} if pick.get("picker") == "source" else {}
+        winner = max(draws, key=draws.get) if draws else None
+        for name in ARMS:
+            arm = info["arms"][name]
+            line = f"  {name}  {arm.yes:.1f} of {arm.yes + arm.no:.1f} downloaded"
+            if name in draws:
+                line += f" · drew {draws[name]:.2f}" + (" ✓" if name == winner else "")
+            lines.append(line)
+        lines.append("Each refresh draws a guess per search kind; the highest guess picks the card.")
+    elif mode == "contextual":
+        post = info.get("posterior")
+        if post is None:
+            lines.append("Discovery card: learns from every input (no model yet)")
+        else:
+            lines.append(f"Discovery card: learns from every input ({post.rows:.0f} cards so far)")
+            spread = post.spread()
+            order = sorted(range(len(post.names)), key=lambda i: -abs(post.mean[i + 1]))
+            lines += [f"  {post.names[i]}  {post.mean[i + 1]:+.2f} ± {spread[i + 1]:.2f}" for i in order]
+    else:
+        lines.append("Discovery card: random from ranks 11–30")
+    if pick.get("fallback"):
+        lines.append(f"This time it fell back to random: {info.get('error') or 'no model yet'}.")
     return "\n".join(lines)
 
 
@@ -356,8 +388,14 @@ class ForYouPage(QWidget):
         self._set_state("list" if self._shown else "empty")
 
     def _set_ranker(self) -> None:
-        self._ranker.setText(ranker_text(self._rec.model(), self._rec.ranker(), self._rec.vectors_meta()))
+        self._ranker.setText(ranker_text(self._rec.model(), self._rec.ranker(), self._rec.vectors_meta())
+                             + "\n\n" + discovery_text(self._rec.discovery_info()))
         self._nearest.setText(nearest_text(self._rec.nearest_words()))
+
+    def refresh_why(self) -> None:
+        """Settings changed how the page is explained (the Discovery card mode): redo the text, not the list."""
+        if self._why.isChecked() and self._shown:
+            self._set_ranker()
 
     def _set_words(self, words: list[tuple[str, float]]) -> None:
         self._words.setText("Your words: " + " · ".join(f"{w} {v:.2f}" for w, v in words))

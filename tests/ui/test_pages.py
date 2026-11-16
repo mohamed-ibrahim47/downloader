@@ -241,3 +241,23 @@ def test_meaning_toggle_retrains(win, qtbot, monkeypatch, change):
 def test_banner_turn_off_clears_the_setting(win):
     win.for_you_page.meaning_off_requested.emit()
     assert win.settings.rec_meaning is False
+
+
+def test_settings_page_discovery_card_combo(qtbot):
+    from PySide6.QtWidgets import QComboBox
+    got = []
+    page = SettingsPage(Settings(), got.append)
+    qtbot.addWidget(page)
+    combo = page.findChild(QComboBox, "rec_discovery")
+    assert [combo.itemText(i) for i in range(combo.count())] == \
+        ["Random", "Learn which search works", "Learn from every input"]
+    assert combo.currentData() == "source"
+    combo.setCurrentIndex(combo.findData("contextual"))
+    assert got[-1].rec_discovery == "contextual"
+
+
+def test_changing_the_discovery_mode_updates_why_this_order(win, monkeypatch):
+    seen = []
+    monkeypatch.setattr(win.for_you_page, "refresh_why", lambda: seen.append(True))
+    win.apply_settings(dataclasses.replace(win.settings, rec_discovery="random"))
+    assert seen

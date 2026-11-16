@@ -390,3 +390,58 @@ def test_vectors_retrain_after_the_list_is_up(qtbot, rec, monkeypatch):
     qtbot.waitUntil(lambda: page.state == "list")
     qtbot.waitUntil(lambda: "retrain" in order)
     assert order == ["refresh", "retrain"]
+
+
+# ---- v5: the Discovery block --------------------------------------------------------
+
+from downloader.engine.recommend.bandit import Arm  # noqa: E402
+from downloader.engine.recommend.bayes import fit_posterior  # noqa: E402
+from downloader.ui.for_you_page import discovery_text  # noqa: E402
+
+
+def _arms():
+    return {"channel": Arm("channel", 1.0, 3.0), "newest": Arm("newest", 4.0, 8.25), "words": Arm("words", 0, 0)}
+
+
+def test_discovery_text_random():
+    info = {"mode": "random", "arms": _arms(), "pick": None, "posterior": None, "error": None}
+    assert discovery_text(info).splitlines()[0] == "Discovery card: random from ranks 11–30"
+
+
+def test_discovery_text_source_marks_the_winner():
+    pick = {"picker": "source", "fallback": None, "draws": {"channel": 0.21, "newest": 0.38}}
+    lines = discovery_text({"mode": "source", "arms": _arms(), "pick": pick, "posterior": None,
+                            "error": None}).splitlines()
+    assert lines[0] == "Discovery card: learns which search works"
+    newest = next(x for x in lines if x.strip().startswith("newest"))
+    assert "4.0 of 12.2 downloaded" in newest and "drew 0.38 ✓" in newest
+    channel = next(x for x in lines if x.strip().startswith("channel"))
+    assert "drew 0.21" in channel and "✓" not in channel
+    words = next(x for x in lines if x.strip().startswith("words"))
+    assert "drew" not in words  # no video of that kind in the pool this time
+    assert lines[-1] == "Each refresh draws a guess per search kind; the highest guess picks the card."
+
+
+def test_discovery_text_contextual_sorts_by_size():
+    post = fit_posterior(["small", "big"], [[i % 2, i / 10] for i in range(20)],
+                         [1 if i > 10 else 0 for i in range(20)], [1.0] * 20)
+    lines = discovery_text({"mode": "contextual", "arms": _arms(), "pick": None, "posterior": post,
+                            "error": None}).splitlines()
+    assert lines[0] == "Discovery card: learns from every input (20 cards so far)"
+    assert lines[1].strip().startswith("big") and lines[2].strip().startswith("small")
+    assert "±" in lines[1]
+
+
+def test_discovery_text_says_when_it_fell_back():
+    pick = {"picker": "random", "fallback": "contextual", "draws": {}}
+    text = discovery_text({"mode": "contextual", "arms": _arms(), "pick": pick, "posterior": None,
+                           "error": None})
+    assert text.splitlines()[-1] == "This time it fell back to random: no model yet."
+
+
+def test_why_this_order_shows_the_discovery_block(qtbot, rec):
+    page = _page(qtbot, rec)
+    page.open()
+    qtbot.waitUntil(lambda: bool(page.cards()), timeout=3000)
+    page.findChild(QCheckBox, "why").setChecked(True)
+    assert "Discovery card: learns which search works" in page.findChild(QLabel, "rankerInfo").text()

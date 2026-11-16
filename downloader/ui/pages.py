@@ -94,6 +94,19 @@ class SettingsPage(QWidget):
         trainer_row.addWidget(self._trainer)
         trainer_row.addStretch(1)
         col.addLayout(trainer_row)
+        discovery_row = QHBoxLayout()
+        discovery_row.addWidget(QLabel("Discovery card", objectName="panelLabel"))
+        self._discovery = QComboBox(objectName="rec_discovery")
+        self._discovery.setToolTip("Who picks the \"Something a little different\" card on For you")
+        for key, text in (("random", "Random"), ("source", "Learn which search works"),
+                          ("contextual", "Learn from every input")):
+            self._discovery.addItem(text, key)
+        self._discovery.setCurrentIndex(max(0, self._discovery.findData(settings.rec_discovery)))
+        self._discovery.currentIndexChanged.connect(
+            lambda _i: self._set(rec_discovery=self._discovery.currentData()))
+        discovery_row.addWidget(self._discovery)
+        discovery_row.addStretch(1)
+        col.addLayout(discovery_row)
         col.addStretch(1)
 
     def set_settings(self, settings: Settings) -> None:

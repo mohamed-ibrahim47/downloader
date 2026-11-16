@@ -171,6 +171,19 @@ Programs, archives and course videos you download count too, at half the weight 
 ("blender"), it is never sent to YouTube (a file name can carry a person's name), and documents and
 pictures never count. **Use file downloads for suggestions** in Settings turns this off.
 
+**Discovery card.** Card 5, "something a little different", comes from further down the list
+(ranks 11–30). **Discovery card** in Settings picks who chooses it:
+- **Random**: any card from that range, as before.
+- **Learn which search works** (the default): a hand-written Thompson-sampling bandit keeps a guess
+  for each kind of search (your channels, newest uploads, title words) of how often its discovery
+  card gets downloaded. Each refresh it draws from those guesses, so a kind it knows little about
+  still gets tried, and one that keeps missing gets tried less. Old results fade over a month.
+- **Learn from every input**: a Bayesian logistic regression, also by hand (Laplace approximation,
+  Newton's method, Cholesky), keeps a belief over how much each input matters, draws one set of
+  weights per refresh, and lets them pick the card.
+
+**Why this order?** shows what the chosen one has learned so far.
+
 ## Install
 
 1. Download `downloader-<version>-windows.zip` from the [latest release](../../releases/latest).
@@ -214,7 +227,7 @@ powershell -File scripts\build_exe.ps1   # set DOWNLOADER_BUILD to choose the ou
 | Part | What it does |
 |---|---|
 | `downloader/engine` | Plain Python, no Qt: link detection, multi-connection HTTP downloads with resume, the queue, the scheduler, YouTube through yt-dlp, and a SQLite store. |
-| `downloader/engine/recommend` | The For you recommender, plain Python with no ML library: words, hand-written TF-IDF, a profile that fades with age, YouTube search queries, ranking with reasons, a SQLite log of what was shown and what you did with it, two learned rankers trained on that log (logistic regression and a small neural network), and hand-written word2vec embeddings for matching by meaning. |
+| `downloader/engine/recommend` | The For you recommender, plain Python with no ML library: words, hand-written TF-IDF, a profile that fades with age, YouTube search queries, ranking with reasons, a SQLite log of what was shown and what you did with it, two learned rankers trained on that log (logistic regression and a small neural network), hand-written word2vec embeddings for matching by meaning, and two bandits for the discovery card (Thompson sampling by search kind, and a Bayesian logistic regression). |
 | `downloader/ui` | PySide6 window. A controller turns the engine's background-thread events into Qt signals, so the window never waits on the network. |
 | `scripts/` | Building the `.exe` (PyInstaller) and drawing the app icon. |
 
