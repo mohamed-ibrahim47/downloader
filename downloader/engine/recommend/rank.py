@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from .candidates import Candidate
 from .profile import Profile
@@ -19,6 +19,20 @@ DISCOVERY_COPY = "Something a little different"
 
 
 @dataclass
+class Pick:
+    """How the discovery card was drawn (design v5, V5): who picked it, and how likely that pick was.
+
+    `picker`: the mode that actually picked ("random", "source", "contextual"). `fallback`: the mode that
+    failed when Random took over. `propensity`: the chance `picker` picks this card from this pool, logged
+    for off-policy evaluation later. `draws`: the source bandit's guess per arm, for "Why this order?".
+    """
+    picker: str
+    propensity: float
+    fallback: str | None = None
+    draws: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
 class Suggestion:
     candidate: Candidate
     score: float  # similarity + boost
@@ -29,6 +43,7 @@ class Suggestion:
     discovery: bool = False
     learned: bool = False  # score is v2's probability, not similarity + boost
     meaning: float = 0.0  # v4: closeness in meaning to the downloads (meaning.MeaningIndex), 0 without it
+    pick: Pick | None = None  # v5: set on a discovery card drawn in this call (None when kept by discovery_id)
 
 
 @dataclass
@@ -76,14 +91,18 @@ def _explain(profile: Profile, m: Model, cand_vec: dict, cand_norm: float, cand_
 
 def rank(profile: Profile, cands: list[Candidate], k: int = TOP_K, rng: random.Random | None = None,
          discovery_id: str | None = None, model: Model | None = None, scorer=None,
-         meaning=None) -> list[Suggestion]:
-    """`discovery_id`: keep this video in the discovery slot while it is still in range, so the slot
+         meaning=None, choose=None) -> list[Suggestion]:
+    """`discovery_id`: keep this video in the discovery slot while it is still in the list, so the slot
     doesn't change under the owner after a Dismiss.
 
     `scorer(suggestion, affinity) -> float`: a learned score in place of v1's similarity + boost. Everything
     after the score (variety, discovery) stays the same.
 
-    `meaning`: a `meaning.MeaningIndex`; each suggestion's `meaning` is set from it before `scorer` runs."""
+    `meaning`: a `meaning.MeaningIndex`; each suggestion's `meaning` is set from it before `scorer` runs.
+
+    `choose(pool, rng) -> (Suggestion, Pick) | None`: who draws the discovery card from the open pool (v5),
+    with a `.mode` attribute. None → a random pick. If it fails or returns None, the pick is random too and
+    its `Pick.fallback` names the mode that failed: a bandit must never break the page."""
     rng = rng or random.Random()
     m = model or build_model(profile, cands)
     scored = []
@@ -133,10 +152,29 @@ def rank(profile: Profile, cands: list[Candidate], k: int = TOP_K, rng: random.R
         stays = diverse[:k - 1]
         open_pool = [s for s in pool
                      if sum(x.candidate.query == s.candidate.query for x in stays) < MAX_PER_QUERY] or pool
-        pick = next((s for s in open_pool if s.candidate.video_id == discovery_id), None) or rng.choice(open_pool)
+        # The kept pick is looked for in the whole list, not only the pool: a Dismiss above it moves it up
+        # (rank 11 becomes 10), and the card must not change under the owner for that.
+        pick = next((s for s in diverse if s.candidate.video_id == discovery_id), None)
+        how = None  # a kept pick isn't drawn again, so it has no new Pick
+        if pick is None:
+            pick, how = _draw(open_pool, rng, choose)
         diverse.remove(pick)
-        diverse.insert(DISCOVERY_POSITION - 1, replace(pick, discovery=True, because=DISCOVERY_COPY))
+        diverse.insert(DISCOVERY_POSITION - 1, replace(pick, discovery=True, because=DISCOVERY_COPY, pick=how))
     return diverse[:k]
+
+
+def _draw(pool: list[Suggestion], rng: random.Random, choose) -> tuple[Suggestion, Pick]:
+    """The discovery card from `choose`, or at random when there is no chooser or it fails."""
+    fallback = None
+    if choose is not None:
+        try:
+            got = choose(pool, rng)
+            if got is not None:
+                return got
+        except Exception:  # any bandit failure: pick at random, and say so
+            pass
+        fallback = getattr(choose, "mode", "unknown")
+    return rng.choice(pool), Pick("random", 1 / len(pool), fallback=fallback)
 
 
 def profile_words(profile: Profile, cands: list[Candidate], n: int = 15,

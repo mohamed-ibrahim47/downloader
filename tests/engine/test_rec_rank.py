@@ -5,7 +5,7 @@ import pytest
 from downloader.engine.models import Download, Kind
 from downloader.engine.recommend.candidates import Candidate
 from downloader.engine.recommend.profile import build_profile
-from downloader.engine.recommend.rank import profile_words, rank
+from downloader.engine.recommend.rank import Pick, profile_words, rank
 
 NOW = 1_800_000_000.0
 
@@ -113,3 +113,72 @@ def test_rank_sets_meaning_on_suggestions():
     assert by_id["p"].meaning == pytest.approx(idx.score(m.cand_tokens[0])) and by_id["p"].meaning > 0
     assert by_id["e"].meaning == pytest.approx(idx.score(m.cand_tokens[1]))
     assert [x.candidate.video_id for x in s] == ["p", "e"]  # no scorer: the order is v1's
+
+
+def _forty():
+    p = _profile(("song", None), ("song", None), ("song", None))
+    return p, [_c(f"{i:02}", f"song w{i:02}x", f"ch{i}") for i in range(40)]
+
+
+def test_a_chooser_picks_the_discovery_card():
+    p, cands = _forty()
+    seen = {}
+
+    def choose(pool, rng):
+        seen["pool"] = [x.candidate.video_id for x in pool]
+        return pool[-1], Pick("source", 0.7)
+    choose.mode = "source"
+    s = rank(p, cands, rng=random.Random(0), choose=choose)
+    assert seen["pool"] == [f"{i:02}" for i in range(10, 30)]
+    assert s[4].discovery and s[4].candidate.video_id == "29" and s[4].pick == Pick("source", 0.7)
+    assert all(x.pick is None for i, x in enumerate(s) if i != 4)
+
+
+def test_random_pick_logs_its_propensity():
+    p, cands = _forty()
+    s = rank(p, cands, rng=random.Random(0))
+    assert s[4].pick.picker == "random" and s[4].pick.propensity == pytest.approx(1 / 20)  # open_pool of 20
+    assert s[4].pick.fallback is None
+
+
+def test_a_kept_pick_does_not_call_the_chooser():
+    p, cands = _forty()
+
+    def choose(pool, rng):
+        raise AssertionError("called")
+    choose.mode = "source"
+    s = rank(p, cands, rng=random.Random(0), discovery_id="17", choose=choose)
+    assert s[4].candidate.video_id == "17" and s[4].pick is None
+
+
+def test_a_failing_chooser_falls_back_to_random():
+    p, cands = _forty()
+
+    def choose(pool, rng):
+        raise RuntimeError("boom")
+    choose.mode = "contextual"
+    s = rank(p, cands, rng=random.Random(0), choose=choose)
+    assert s[4].discovery and s[4].pick.picker == "random" and s[4].pick.fallback == "contextual"
+    assert s[4].pick.propensity == pytest.approx(1 / 20)
+
+
+def test_a_chooser_returning_none_falls_back_to_random():
+    p, cands = _forty()
+
+    def choose(pool, rng):
+        return None
+    choose.mode = "source"
+    s = rank(p, cands, rng=random.Random(0), choose=choose)
+    assert s[4].discovery and s[4].pick.picker == "random" and s[4].pick.fallback == "source"
+
+
+def test_a_kept_pick_stays_when_it_moves_up_out_of_the_pool():
+    # Dismissing a card above it moves rank 11 to rank 10: it must stay the discovery card, not be redrawn.
+    p, cands = _forty()
+
+    def choose(pool, rng):
+        raise AssertionError("called")
+    choose.mode = "source"
+    s = rank(p, cands, rng=random.Random(0), discovery_id="09", choose=choose)
+    ids = [x.candidate.video_id for x in s]
+    assert s[4].candidate.video_id == "09" and s[4].discovery and s[4].pick is None and len(set(ids)) == 10
