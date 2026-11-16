@@ -29,3 +29,12 @@ def test_settings_ignores_unknown_and_fills_missing(tmp_path):
 
 def test_load_without_saved_settings(tmp_path):
     assert Settings.load(Store(tmp_path / "db.sqlite")) == Settings()
+
+
+def test_rec_discovery_defaults_to_source_and_bad_values_load_as_source(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    assert Settings().rec_discovery == "source"
+    store.set_setting("settings", {"rec_discovery": "contextual"})
+    assert Settings.load(store).rec_discovery == "contextual"
+    store.set_setting("settings", {"rec_discovery": "magic"})
+    assert Settings.load(store).rec_discovery == "source"

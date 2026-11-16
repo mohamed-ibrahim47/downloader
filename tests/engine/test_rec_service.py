@@ -329,7 +329,7 @@ def test_a_v3_model_ranks_the_page_and_is_logged(rec):
     v1 = [x.candidate.video_id for x in rec.suggestions()]
     rec.store.set_setting("rec_model", _net_model(-5.0))
     before = rec.store.query("SELECT COUNT(*) FROM rec_events WHERE event = 'shown'")[0][0]
-    rec._generation = None  # a new list, so the impressions are logged again
+    rec.log.mark_refreshed(rec.log.last_refresh() + 1)  # a new list, so the impressions are logged again
     got = rec.suggestions()
     assert [x.candidate.video_id for x in got] != v1 and all(0.0 <= x.score <= 1.0 for x in got)
     assert rec.ranker() == "v3"
@@ -585,3 +585,131 @@ def test_meaning_index_is_reused_between_draws(rec, with_starter, monkeypatch):
     rec.dismiss(first[0])
     after = rec.suggestions()
     assert len(built) == 2 and first[0].candidate.video_id not in {s.candidate.video_id for s in after}
+
+
+# ---- v5: the discovery card's bandit ----------------------------------------------------
+
+from downloader.engine.recommend import service as service_mod  # noqa: E402
+from downloader.engine.recommend.bayes import Posterior  # noqa: E402
+from downloader.engine.recommend.service import BANDIT_KEY, PICK_KEY  # noqa: E402
+from downloader.engine.settings import Settings  # noqa: E402
+
+
+def _set_mode(store, mode):
+    s = Settings.load(store)
+    s.rec_discovery = mode
+    s.save(store)
+
+
+def _shown_features(store):
+    return [json.loads(r[0]) for r in store.query("SELECT features FROM rec_events WHERE event = 'shown' ORDER BY id")]
+
+
+def _disc(picks):
+    return next(s for s in picks if s.discovery)
+
+
+def test_discovery_row_logs_picker_and_propensity(rec):
+    rec.refresh()
+    rec.suggestions()
+    rows = _shown_features(rec.store)
+    disc = [f for f in rows if f["discovery"]]
+    assert len(disc) == 1 and disc[0]["picker"] == "source" and 0 < disc[0]["propensity"] <= 1
+    assert disc[0]["fallback"] is None
+    assert all("picker" not in f for f in rows if not f["discovery"])
+
+
+def test_random_mode_logs_one_over_pool(rec, store):
+    _set_mode(store, "random")
+    rec.refresh()
+    rec.suggestions()
+    disc = [f for f in _shown_features(store) if f["discovery"]][0]
+    assert disc["picker"] == "random" and disc["fallback"] is None
+    n = 1 / disc["propensity"]
+    assert n == pytest.approx(round(n)) and 1 <= round(n) <= 20
+
+
+def test_restart_keeps_pick_and_does_not_relog(rec, store, clock):
+    rec.refresh()
+    first = _disc(rec.suggestions()).candidate.video_id
+    again = Recommender(store, search=_fake_search, clock=lambda: clock.now, rng=random.Random(99))
+    assert _disc(again.suggestions()).candidate.video_id == first
+    assert len(_shown_features(store)) == 10
+
+
+def test_a_words_only_view_draws_but_the_logged_row_still_has_its_pick(rec, store):
+    rec.refresh()
+    rec.words()  # draws the card without logging it
+    rec.suggestions()
+    disc = [f for f in _shown_features(store) if f["discovery"]]
+    assert len(disc) == 1 and disc[0]["picker"] == "source"
+
+
+def test_mode_change_keeps_card_until_next_draw(rec, store):
+    rec.refresh()
+    card = _disc(rec.suggestions())
+    _set_mode(store, "contextual")
+    assert _disc(rec.suggestions()).candidate.video_id == card.candidate.video_id
+    rec.dismiss(card)
+    new = _disc(rec.suggestions())
+    assert new.candidate.video_id != card.candidate.video_id
+    disc = [f for f in _shown_features(store) if f["discovery"]]
+    assert len(disc) == 2
+    assert disc[1]["picker"] == "contextual" or (disc[1]["picker"] == "random" and disc[1]["fallback"] == "contextual")
+
+
+def test_contextual_without_posterior_falls_back(rec, store):
+    _set_mode(store, "contextual")
+    rec.refresh()
+    store.set_setting(BANDIT_KEY, None)
+    rec.suggestions()
+    disc = [f for f in _shown_features(store) if f["discovery"]][0]
+    assert disc["picker"] == "random" and disc["fallback"] == "contextual"
+
+
+def test_contextual_with_stale_posterior_falls_back(rec, store):
+    _set_mode(store, "contextual")
+    rec.refresh()
+    stale = Posterior(["x"], [0.0, 0.0], [[1.0, 0.0], [0.0, 1.0]], [0.0], [1.0], 0.0)
+    store.set_setting(BANDIT_KEY, {"posterior": stale.to_json(), "error": None, "trained_at": 0})
+    rec.suggestions()
+    disc = [f for f in _shown_features(store) if f["discovery"]][0]
+    assert disc["picker"] == "random" and disc["fallback"] == "contextual"
+
+
+def test_contextual_mode_picks_with_the_trained_posterior(rec, store):
+    _set_mode(store, "contextual")
+    rec.refresh()
+    rec.suggestions()
+    disc = [f for f in _shown_features(store) if f["discovery"]][0]
+    assert disc["picker"] == "contextual" and 0 < disc["propensity"] <= 1
+
+
+def test_train_saves_a_posterior_from_discovery_rows(rec, store, clock):
+    rec.refresh()
+    rec.dismiss(_disc(rec.suggestions()))
+    rec.suggestions()
+    clock.now += 7 * 3600
+    rec.refresh()  # the first list is settled now: its two discovery cards are rows
+    saved = store.get_setting(BANDIT_KEY)
+    assert saved["error"] is None and Posterior.from_json(saved["posterior"]).rows > 1
+
+
+def test_a_bandit_training_error_is_saved_not_raised(rec, store, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("bad maths")
+    monkeypatch.setattr(service_mod, "posterior_from_rows", boom)
+    rec.refresh()
+    saved = store.get_setting(BANDIT_KEY)
+    assert saved["posterior"] is None and "bad maths" in saved["error"]
+    assert store.get_setting(service_mod.MODEL_KEY) is not None  # the ranker's training still saved
+
+
+def test_discovery_info_reports_mode_arms_and_pick(rec, store):
+    rec.refresh()
+    card = _disc(rec.suggestions())
+    info = rec.discovery_info()
+    assert info["mode"] == "source" and set(info["arms"]) == {"channel", "newest", "words"}
+    assert info["pick"]["video_id"] == card.candidate.video_id and info["pick"]["picker"] == "source"
+    assert info["pick"]["draws"] and info["posterior"] is not None and info["error"] is None
+    assert store.get_setting(PICK_KEY)["refresh"] == rec.log.last_refresh()

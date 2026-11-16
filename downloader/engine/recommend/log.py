@@ -83,6 +83,13 @@ class RecLog:
         return self.store.query("SELECT id, video_id, event, features, at, refresh, title FROM rec_events "
                                 "WHERE event IN ('shown', 'downloaded', 'dismissed') ORDER BY id")
 
+    def shown_ids(self, refresh: float | None) -> set[str]:
+        """The videos already logged as shown in this refresh's list (to rebuild that after a restart)."""
+        if refresh is None:
+            return set()
+        return {r[0] for r in self.store.query("SELECT DISTINCT video_id FROM rec_events WHERE event = 'shown' "
+                                               "AND refresh = ?", (refresh,))}
+
     def titles(self) -> list[str]:
         """Every distinct title the log has seen (shown, downloaded, dismissed)."""
         return [r[0] for r in self.store.query("SELECT DISTINCT title FROM rec_events WHERE title IS NOT NULL "

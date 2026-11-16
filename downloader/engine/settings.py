@@ -9,6 +9,7 @@ from .store import Store
 
 WHEN_DONE = ("nothing", "notify", "sleep")
 CONNECTION_CHOICES = (1, 4, 8, 16)
+DISCOVERY_MODES = ("random", "source", "contextual")  # For you: who picks the discovery card (v5)
 
 
 def _downloads(*sub: str) -> str:
@@ -34,6 +35,7 @@ class Settings:
     rec_trainer: str = "hand"  # "hand" (our gradient descent) or "sklearn" (when it's installed)
     rec_meaning: bool = True  # For you: "Match by meaning" (v4 embeddings)
     rec_files: bool = True  # For you: "Use file downloads for suggestions" (programs, archives, course videos)
+    rec_discovery: str = "source"  # For you: "Discovery card", one of DISCOVERY_MODES
     schedule: Schedule = field(default_factory=Schedule)
 
     @property
@@ -49,6 +51,8 @@ class Settings:
         if isinstance(values.get("schedule"), dict):
             sched_known = {f.name for f in fields(Schedule)}
             values["schedule"] = Schedule(**{k: v for k, v in values["schedule"].items() if k in sched_known})
+        if values.get("rec_discovery") not in DISCOVERY_MODES:
+            values.pop("rec_discovery", None)  # unknown (a newer or broken save): the default
         return cls(**values)
 
     def save(self, store: Store) -> None:

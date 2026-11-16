@@ -15,6 +15,8 @@ from .. import youtube
 from ..settings import Settings
 from ..store import Store
 from . import embed, evaluate, starter, starter_vectors
+from .bandit import arm_stats, pick_source, propensity
+from .bayes import Posterior, pick_contextual, posterior_from_rows
 from .candidates import Candidate, fetch, keep, plan
 from .dataset import rows as training_rows
 from .features import NAMES, from_suggestion
@@ -23,7 +25,7 @@ from .neural import Net, NetTrainer
 from .log import RecLog
 from .meaning import MeaningIndex, v4_score
 from .profile import Dismissed, Profile, build_profile
-from .rank import TOP_K, Suggestion, build_model, profile_words, rank
+from .rank import TOP_K, Pick, Suggestion, build_model, profile_words, rank
 from .text import tokenize
 from .tfidf import fit_idf
 
@@ -31,6 +33,8 @@ REFRESH_AFTER = 6 * 3600  # seconds: opening the page searches again only when t
 MODEL_KEY = "rec_model"  # settings key: the latest training, its evaluation, and which ranker is on
 VECTORS_KEY = "rec_vectors_meta"  # settings key: when the owner's own vectors were trained, on how many titles
 BANNER_KEY = "rec_meaning_banner"  # settings key: "done" once the owner closed the "match by meaning" banner
+BANDIT_KEY = "rec_bandit"  # settings key: the contextual bandit's posterior (v5), or the error that stopped it
+PICK_KEY = "rec_discovery_pick"  # settings key: this refresh's discovery pick, so a restart keeps it (v5, V1)
 RETRAIN_EVERY = 300  # new titles seen before the vectors are trained again on the owner's own titles
 
 
@@ -140,6 +144,74 @@ class Recommender:
                            "v3_auc": rep.v3_auc, "v3_log_loss": rep.v3_log_loss,
                            "v3_epochs": rep.net.epochs if rep.net else 0},
                 "trained_at": self._clock()})
+            self._train_bandit(rows)
+
+    def _train_bandit(self, rows) -> None:
+        """The contextual bandit's belief, from the same rows (meaning already recomputed). Never raises:
+        a failure is saved, and that mode picks at random until the next training works."""
+        try:
+            post, error = posterior_from_rows(NAMES, rows, self._clock()).to_json(), None
+        except Exception as e:
+            post, error = None, str(e) or type(e).__name__
+        self.store.set_setting(BANDIT_KEY, {"posterior": post, "error": error, "trained_at": self._clock()})
+
+    # ---- the discovery card (v5) -------------------------------------------------------
+
+    def _arms(self, events=None) -> dict:
+        """The source bandit's arms from the settled discovery rows."""
+        events = self.log.events() if events is None else events
+        return arm_stats(training_rows(events, open_refresh=self.log.last_refresh()), self._clock())
+
+    def _posterior(self) -> Posterior:
+        """The saved contextual posterior; raises when there is none or it was trained on other inputs."""
+        saved = self.store.get_setting(BANDIT_KEY) or {}
+        if not saved.get("posterior"):
+            raise RuntimeError(saved.get("error") or "no model yet")
+        post = Posterior.from_json(saved["posterior"])
+        if post.names != NAMES:
+            raise RuntimeError("the model was trained on other inputs")
+        return post
+
+    def _chooser(self, mode: str):
+        """`choose(pool, rng)` for rank(), or None for Random. The work happens only when a card is drawn."""
+        if mode == "source":
+            def choose(pool, rng):
+                arms = self._arms()
+                got = pick_source(pool, arms, rng)
+                if got is None:
+                    return None
+                card, draws = got
+                p = propensity(lambda pl, r: pick_source(pl, arms, r), pool, card.candidate.video_id, rng)
+                return card, Pick("source", p, draws=draws)
+        elif mode == "contextual":
+            def choose(pool, rng):
+                post = self._posterior()
+                card = pick_contextual(pool, post, rng)
+                if card is None:
+                    return None
+                p = propensity(lambda pl, r: pick_contextual(pl, post, r), pool, card.candidate.video_id, rng)
+                return card, Pick("contextual", p)
+        else:
+            return None
+        choose.mode = mode
+        return choose
+
+    def _saved_pick(self) -> dict | None:
+        """This refresh's saved discovery pick, or None (none yet, or it belongs to an older refresh)."""
+        saved = self.store.get_setting(PICK_KEY)
+        if isinstance(saved, dict) and saved.get("refresh") == self.log.last_refresh():
+            return saved
+        return None
+
+    def discovery_info(self) -> dict:
+        """For "Why this order?": the mode, the arms, this refresh's pick, and the posterior (or its error)."""
+        saved = self.store.get_setting(BANDIT_KEY) or {}
+        try:
+            post, error = self._posterior(), None
+        except Exception as e:
+            post, error = None, saved.get("error") or str(e)
+        return {"mode": Settings.load(self.store).rec_discovery, "arms": self._arms(), "pick": self._saved_pick(),
+                "posterior": post, "error": error}
 
     # ---- the word vectors (v4) ---------------------------------------------------------
 
@@ -307,8 +379,10 @@ class Recommender:
                                                   starter_vectors.MEANING_MIX)
         else:
             scorer = None
+        choose = self._chooser(Settings.load(self.store).rec_discovery)
         picks = rank(profile, cands, k, self._rng, discovery_id=self._discovery, model=model, scorer=scorer,
-                     meaning=index)
+                     meaning=index, choose=choose)
+        self._remember_pick(picks)
         if name == "v4":
             for s in picks:
                 s.learned = False  # v4's score is v1's formula with meaning mixed in, not a learned probability
@@ -330,11 +404,30 @@ class Recommender:
             cached = self._meaning_cache = (vectors, key, MeaningIndex(profile, vectors, idf))
         return cached[2]
 
+    def _remember_pick(self, picks: list[Suggestion]) -> None:
+        """Save a fresh draw for this refresh. A kept card gets its saved Pick back, so its first `shown` row
+        has it even when the draw happened in a view that didn't log (words only), or before a restart."""
+        disc = next((s for s in picks if s.discovery), None)
+        if disc is None:
+            return
+        if disc.pick is not None:
+            p = disc.pick
+            self.store.set_setting(PICK_KEY, {"refresh": self._generation, "video_id": disc.candidate.video_id,
+                                              "picker": p.picker, "propensity": p.propensity,
+                                              "fallback": p.fallback, "draws": p.draws})
+            return
+        saved = self._saved_pick()
+        if saved and saved.get("video_id") == disc.candidate.video_id:
+            disc.pick = Pick(saved["picker"], saved["propensity"], saved.get("fallback"), saved.get("draws") or {})
+
     def _start_generation(self) -> None:
-        """A new refresh means a new list: forget what was logged and the old discovery pick."""
+        """A new refresh means a new list. What was already logged for it, and its discovery pick, come from
+        the database: restarting the app within one refresh neither draws again nor logs twice."""
         last = self.log.last_refresh()
         if last != self._generation:
-            self._generation, self._logged, self._discovery = last, set(), None
+            self._generation, self._logged = last, self.log.shown_ids(last)
+            saved = self._saved_pick()
+            self._discovery = saved.get("video_id") if saved else None
 
     def _log_shown(self, picks: list[Suggestion], profile: Profile, ranker: str) -> None:
         """One `shown` row per video per refresh: a redraw after a Dismiss is not a new impression."""
@@ -378,7 +471,9 @@ def _features(s: Suggestion, profile: Profile, rank_: int, ranker: str = "v1") -
             "affinity": profile.channels.get(s.candidate.channel, 0.0) if s.candidate.channel else 0.0,
             "duration": s.candidate.duration, "rank": rank_, "discovery": s.discovery, "shared": len(s.shared),
             "kind": s.candidate.kind, "ranker": ranker,
-            "meaning": s.meaning}
+            "meaning": s.meaning,
+            **({"picker": s.pick.picker, "propensity": s.pick.propensity, "fallback": s.pick.fallback}
+               if s.discovery and s.pick is not None else {})}
 
 
 __all__ = ["REFRESH_AFTER", "Recommender", "View", "Candidate"]
