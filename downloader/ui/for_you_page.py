@@ -43,6 +43,8 @@ def _menu_text(text: str) -> str:
 
 def _score_text(s: Suggestion) -> str:
     meaning = f" · meaning {s.meaning:.2f}" if s.meaning else ""
+    if s.two_tower:  # v7: u·v, a match score with no fixed range, never a chance
+        return f"score {s.score:.2f} (two-tower) · similarity {s.similarity:.2f}{meaning} · channel {s.boost:.2f}"
     if s.learned:  # a learned score (v2, v3) is a probability; similarity and channel are only two of its inputs
         return f"chance {s.score:.0%} (learned) · similarity {s.similarity:.2f}{meaning} · channel {s.boost:.2f}"
     if s.meaning:  # v4: v1's formula with meaning mixed in

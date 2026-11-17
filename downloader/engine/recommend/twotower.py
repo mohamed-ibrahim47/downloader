@@ -241,16 +241,17 @@ def history_of(profile: Profile) -> list[tuple[float, list[str]]]:
 
 
 def examples(rows: list[Row], history: list[tuple[float, list[str]]]) -> list[Example]:
-    """One example per download in a titled list: that video first, then every other video of the list.
-    "You" at that moment = the newest HISTORY downloads finished before the list was made."""
+    """One example per download in a titled list: that video first, then the list's videos that were dismissed
+    or scrolled past (another download in the same list is never a "no"). "You" at that moment = the newest
+    HISTORY downloads finished before the list was made."""
     hist_sorted = sorted(history, key=lambda h: h[0])
     out = []
     for refresh, rs in titled_lists(rows).items():
         hist = [tok for at, tok in hist_sorted if at < refresh][-HISTORY:]
-        toks = [tokenize(r.title) for r in rs]
-        for i, r in enumerate(rs):
+        negatives = [tokenize(r.title) for r in rs if r.label == 0]
+        for r in rs:
             if r.label == 1:
-                out.append(Example(hist=hist, cands=[toks[i]] + toks[:i] + toks[i + 1:]))
+                out.append(Example(hist=hist, cands=[tokenize(r.title)] + negatives))
     return out
 
 

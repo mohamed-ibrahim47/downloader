@@ -44,6 +44,7 @@ class Suggestion:
     learned: bool = False  # score is v2's probability, not similarity + boost
     meaning: float = 0.0  # v4: closeness in meaning to the downloads (meaning.MeaningIndex), 0 without it
     pick: Pick | None = None  # v5: set on a discovery card drawn in this call (None when kept by discovery_id)
+    two_tower: bool = False  # v7: score is u·v from the two towers, not a probability
 
 
 @dataclass

@@ -845,3 +845,29 @@ def test_old_database_setting_on(rec, store, with_starter):
     assert rec.ranker() == "v2"
     assert rec.two_tower_info() is None
     rec.suggestions()  # no candidates yet (no refresh): the point is that nothing raises
+
+
+def test_v7_cards_are_not_shown_as_a_chance(rec, store, with_starter):
+    _set(store, rec_two_tower=True)
+    rec.refresh()
+    _save_v7(rec, store)
+    picks = rec.suggestions()
+    assert picks and all(x.two_tower and not x.learned for x in picks)
+
+
+def test_v7_stamp_is_the_vectors_it_trained_on(rec, store, with_starter, monkeypatch):
+    """The word vectors retrain (their own task) while train() runs: v7 must carry the stamp of the vectors it
+    was fit on, so it steps aside instead of ranking with vectors it was never judged on."""
+    from downloader.engine.recommend import evaluate
+    _set(store, rec_two_tower=True)
+    real = evaluate.evaluate
+
+    def retrain_meanwhile(*a, **k):
+        store.set_setting("rec_vectors_meta", {"source": "own", "words": 6, "titles": 300, "at": 999.0})
+        return real(*a, **k)
+    monkeypatch.setattr(evaluate, "evaluate", retrain_meanwhile)
+    monkeypatch.setattr(twotower, "contest", lambda *a, **k: twotower.Contest(3, 0.9, 0.5, True, "v7 beats v4"))
+    rec.refresh()
+    info = rec.two_tower_info()
+    assert info["active"] and info["vectors_at"] is None
+    assert rec.ranker() != "v7"

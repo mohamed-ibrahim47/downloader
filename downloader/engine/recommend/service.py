@@ -117,6 +117,9 @@ class Recommender:
             now = self._clock()  # one stamp for rec_model and v7's model: v7 ranks only beside its own run
             settings = Settings.load(self.store)
             events = self.log.events()
+            # The stamp is read before the vectors: retrain_vectors swaps the vectors first and writes the stamp
+            # after, so a retrain in between can only make v7 step aside, never vouch for vectors it didn't see.
+            vectors_at = self.vectors_meta().get("at")
             vectors = self.vectors() if settings.rec_meaning else None
             meaning_fn = self._meaning_at(events, vectors, settings) if vectors else (lambda _t, _r: 0.0)
             rows = training_rows(events, open_refresh=self.log.last_refresh(), meaning=meaning_fn)
@@ -149,11 +152,12 @@ class Recommender:
                 "trained_at": now})
             self._train_bandit(rows)
             if settings.rec_two_tower:  # off: v7's code never runs (design A1)
-                self._train_two_tower(rows, rep, ranker, now, vectors, settings)
+                self._train_two_tower(rows, rep, ranker, now, vectors, vectors_at, settings)
 
-    def _train_two_tower(self, rows, rep, rival: str, now: float, vectors, settings: Settings) -> None:
-        """v7 against the ranker this run picked, on the newest titled lists (design A4, A7). Never raises."""
-        out = {"trained_at": now, "vectors_at": self.vectors_meta().get("at") if vectors else None,
+    def _train_two_tower(self, rows, rep, rival: str, now: float, vectors, vectors_at, settings: Settings) -> None:
+        """v7 against the ranker this run picked, on the newest titled lists (design A4, A7). Never raises.
+        `vectors_at`: the stamp read when `train()` took `vectors`."""
+        out = {"trained_at": now, "vectors_at": vectors_at if vectors else None,
                "active": False, "reason": "v7 needs Match by meaning", "ndcg": {}, "lists": 0, "model": None}
         if vectors is not None:
             try:
@@ -310,9 +314,9 @@ class Recommender:
             if not len(v):
                 return False
             self.log.save_vectors(v)
+            self._vectors, self._vectors_loaded = v, True  # before the stamp: see train()
             self.store.set_setting(VECTORS_KEY, {"source": "own", "titles": len(titles), "words": len(v),
                                                  "at": self._clock()})
-            self._vectors, self._vectors_loaded = v, True
             return True
         finally:
             self._retraining.release()
@@ -440,6 +444,9 @@ class Recommender:
         picks = rank(profile, cands, k, self._rng, discovery_id=self._discovery, model=model, scorer=scorer,
                      meaning=index, choose=choose)
         self._remember_pick(picks)
+        if name == "v7":
+            for s in picks:
+                s.learned, s.two_tower = False, True  # u·v is a match score, not a probability
         if name == "v4":
             for s in picks:
                 s.learned = False  # v4's score is v1's formula with meaning mixed in, not a learned probability

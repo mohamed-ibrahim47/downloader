@@ -109,8 +109,8 @@ def test_examples_two_downloads_one_list():
     rs = [_row("a", 10.0, 1, "cat one"), _row("b", 10.0, 1, "cat two"), _row("c", 10.0, 0, "car three")]
     ex = twotower.examples(rs, [])
     assert [e.cands[0] for e in ex] == [["cat", "one"], ["cat", "two"]]
-    assert ["cat", "two"] in ex[0].cands[1:] and ["cat", "one"] in ex[1].cands[1:]
-    assert all(len(e.cands) == 3 for e in ex)
+    # negatives are only what was dismissed or scrolled past: the other download is never a "no" (spec A3)
+    assert all(e.cands[1:] == [["car", "three"]] for e in ex)
 
 
 def test_examples_skip_untitled_list():

@@ -472,3 +472,12 @@ def test_ranker_text_v7_off():
     from downloader.ui.for_you_page import ranker_text
     text = ranker_text({"active": False, "reason": "x", "report": {}, "compare": {}}, "v1", None, None)
     assert "v7" not in text
+
+
+def test_two_tower_card_text_is_a_score_not_a_chance():
+    from downloader.engine.recommend.candidates import Candidate
+    from downloader.engine.recommend.rank import Suggestion
+    from downloader.ui.for_you_page import _score_text
+    c = Candidate("v", "u", "t", "ch", 100, "q")
+    text = _score_text(Suggestion(c, 3.4, 0.2, 0.1, None, [], two_tower=True))
+    assert text.startswith("score 3.40 (two-tower)") and "chance" not in text and "%" not in text
