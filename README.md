@@ -184,6 +184,13 @@ pictures never count. **Use file downloads for suggestions** in Settings turns t
 
 **Why this order?** shows what the chosen one has learned so far.
 
+**Two-tower ranker (experimental, off by default).** **Try the two-tower ranker (v7, experimental)** in
+Settings turns on a small two-tower network: one tower turns a video's title into a vector, the other turns
+your recent downloads into a vector, and the score is how well the two line up. It learns only from your
+own lists (the word vectors from **Match by meaning** stay fixed, and only the two small layers on top
+learn), and it ranks For you only when it beats the current ranker on your newest lists. With the setting
+off, none of its code runs.
+
 ## Install
 
 1. Download `downloader-<version>-windows.zip` from the [latest release](../../releases/latest).
@@ -227,7 +234,7 @@ powershell -File scripts\build_exe.ps1   # set DOWNLOADER_BUILD to choose the ou
 | Part | What it does |
 |---|---|
 | `downloader/engine` | Plain Python, no Qt: link detection, multi-connection HTTP downloads with resume, the queue, the scheduler, YouTube through yt-dlp, and a SQLite store. |
-| `downloader/engine/recommend` | The For you recommender, plain Python with no ML library: words, hand-written TF-IDF, a profile that fades with age, YouTube search queries, ranking with reasons, a SQLite log of what was shown and what you did with it, two learned rankers trained on that log (logistic regression and a small neural network), hand-written word2vec embeddings for matching by meaning, and two bandits for the discovery card (Thompson sampling by search kind, and a Bayesian logistic regression). |
+| `downloader/engine/recommend` | The For you recommender, plain Python with no ML library: words, hand-written TF-IDF, a profile that fades with age, YouTube search queries, ranking with reasons, a SQLite log of what was shown and what you did with it, two learned rankers trained on that log (logistic regression and a small neural network), hand-written word2vec embeddings for matching by meaning, two bandits for the discovery card (Thompson sampling by search kind, and a Bayesian logistic regression), and an optional two-tower ranker. |
 | `downloader/ui` | PySide6 window. A controller turns the engine's background-thread events into Qt signals, so the window never waits on the network. |
 | `scripts/` | Building the `.exe` (PyInstaller) and drawing the app icon. |
 

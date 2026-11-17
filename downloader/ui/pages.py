@@ -77,7 +77,13 @@ class SettingsPage(QWidget):
                                "documents and pictures never do")
         self._files.setChecked(settings.rec_files)
         self._files.toggled.connect(lambda on: self._set(rec_files=on))
+        self._two_tower = QCheckBox("Try the two-tower ranker (v7, experimental)", objectName="rec_two_tower")
+        self._two_tower.setToolTip("A small two-tower network learns from your own lists; it ranks For you only "
+                                   "when it beats the current ranker. Needs Match by meaning")
+        self._two_tower.setChecked(settings.rec_two_tower)
+        self._two_tower.toggled.connect(lambda on: self._set(rec_two_tower=on))
         col.addWidget(self._meaning)
+        col.addWidget(self._two_tower)
         col.addWidget(self._files)
         trainer_row = QHBoxLayout()
         trainer_row.addWidget(QLabel("Train it with", objectName="panelLabel"))

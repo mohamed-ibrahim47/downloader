@@ -230,7 +230,7 @@ def test_settings_page_has_the_meaning_and_files_checkboxes(qtbot):
     assert meaning.isChecked()
 
 
-@pytest.mark.parametrize("change", [{"rec_meaning": False}, {"rec_files": False}])
+@pytest.mark.parametrize("change", [{"rec_meaning": False}, {"rec_files": False}, {"rec_two_tower": True}])
 def test_meaning_toggle_retrains(win, qtbot, monkeypatch, change):
     trained = []
     monkeypatch.setattr(win.recommender, "train", lambda: trained.append(True))
@@ -261,3 +261,15 @@ def test_changing_the_discovery_mode_updates_why_this_order(win, monkeypatch):
     monkeypatch.setattr(win.for_you_page, "refresh_why", lambda: seen.append(True))
     win.apply_settings(dataclasses.replace(win.settings, rec_discovery="random"))
     assert seen
+
+
+def test_two_tower_checkbox(qtbot):
+    got = []
+    page = SettingsPage(Settings(), got.append)
+    qtbot.addWidget(page)
+    box = page.findChild(QCheckBox, "rec_two_tower")
+    assert box.text() == "Try the two-tower ranker (v7, experimental)" and not box.isChecked()
+    boxes = [b.objectName() for b in page.findChildren(QCheckBox)]
+    assert boxes.index("rec_two_tower") == boxes.index("rec_meaning") + 1
+    box.setChecked(True)
+    assert got[-1].rec_two_tower is True

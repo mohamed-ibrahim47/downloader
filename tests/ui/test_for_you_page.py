@@ -445,3 +445,30 @@ def test_why_this_order_shows_the_discovery_block(qtbot, rec):
     qtbot.waitUntil(lambda: bool(page.cards()), timeout=3000)
     page.findChild(QCheckBox, "why").setChecked(True)
     assert "Discovery card: learns which search works" in page.findChild(QLabel, "rankerInfo").text()
+
+
+V7 = {"trained_at": 1.0, "vectors_at": None, "active": True, "reason": "v7 beats v4 on your newest lists (NDCG 0.62 vs 0.58)",
+      "ndcg": {"v7": 0.62, "v4": 0.58}, "lists": 4, "model": "{}"}
+
+
+def test_ranker_text_v7():
+    from downloader.ui.for_you_page import ranker_text
+    model = {"active": False, "reason": "Learning: 50 of 100 rows", "report": {}, "compare": {}}
+    lines = ranker_text(model, "v7", None, V7).splitlines()
+    assert lines[0] == "Ranked by: Two-tower (v7), learned from your lists"
+    assert "v7 beats v4 on your newest lists (NDCG 0.62 vs 0.58)" in lines
+    assert "v7 NDCG@10 0.62 vs v4 0.58" in lines
+
+
+def test_ranker_text_v7_not_ranking_still_says_why():
+    from downloader.ui.for_you_page import ranker_text
+    info = {**V7, "active": False, "reason": "v7 needs Match by meaning", "ndcg": {}}
+    text = ranker_text({"active": False, "reason": "x", "report": {}, "compare": {}}, "v1", None, info)
+    assert text.splitlines()[0] == "Ranked by: Hand-tuned (v1)"
+    assert "Two-tower (v7): v7 needs Match by meaning" in text
+
+
+def test_ranker_text_v7_off():
+    from downloader.ui.for_you_page import ranker_text
+    text = ranker_text({"active": False, "reason": "x", "report": {}, "compare": {}}, "v1", None, None)
+    assert "v7" not in text

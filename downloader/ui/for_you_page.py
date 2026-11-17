@@ -75,12 +75,18 @@ TRAINER_NAMES = {"hand": "hand-written trainer", "sklearn": "scikit-learn"}
 ACTIVATION_NAMES = {"relu": "ReLU", "leaky_relu": "leaky ReLU", "tanh": "tanh", "sigmoid": "sigmoid"}
 
 
-def ranker_text(model: dict | None, ranker: str, vectors_meta: dict | None = None) -> str:
-    """The "Why this order?" block: which ranker is on, how learning goes, and the learned weights."""
+def ranker_text(model: dict | None, ranker: str, vectors_meta: dict | None = None,
+                two_tower: dict | None = None) -> str:
+    """The "Why this order?" block: which ranker is on, how learning goes, and the learned weights.
+
+    `two_tower`: v7's latest training (`Recommender.two_tower_info()`); None when its setting is off, and
+    then nothing about v7 is shown."""
     lines = []
     weights = Weights.from_json(model["weights"]) if model and model.get("weights") else None
     net = Net.from_json(model["net"]) if model and model.get("net") else None
-    if ranker == "v3" and net:
+    if ranker == "v7":
+        lines.append("Ranked by: Two-tower (v7), learned from your lists")
+    elif ranker == "v3" and net:
         shape = f"{len(net.names)} → {len(net.W1)} → 1, {ACTIVATION_NAMES.get(net.activation, net.activation)}"
         lines.append(f"Ranked by: Learned (v3), small neural network ({shape})")
     elif ranker == "v2" and weights:
@@ -102,6 +108,13 @@ def ranker_text(model: dict | None, ranker: str, vectors_meta: dict | None = Non
         if ("v3" in ndcg or "v4" in ndcg) and report.get("test_lists", 1) > 0:  # no lists yet: nothing measured
             lines.append("NDCG@10 on your newest lists: "
                          + " · ".join(f"{k} {ndcg[k]:.2f}" for k in ("v1", "v4", "v2", "v3") if k in ndcg))
+    if two_tower:
+        why = two_tower.get("reason", "")
+        lines.append(why if ranker == "v7" else f"Two-tower (v7): {why}")
+        nd = two_tower.get("ndcg") or {}
+        rival = next((k for k in nd if k != "v7"), None)
+        if "v7" in nd and rival:
+            lines.append(f"v7 NDCG@10 {nd['v7']:.2f} vs {rival} {nd[rival]:.2f}")
     compare = {name: Weights.from_json(text) for name, text in (model or {}).get("compare", {}).items()}
     if compare:
         names = [n for n in ("hand", "sklearn") if n in compare]
@@ -388,7 +401,8 @@ class ForYouPage(QWidget):
         self._set_state("list" if self._shown else "empty")
 
     def _set_ranker(self) -> None:
-        self._ranker.setText(ranker_text(self._rec.model(), self._rec.ranker(), self._rec.vectors_meta())
+        self._ranker.setText(ranker_text(self._rec.model(), self._rec.ranker(), self._rec.vectors_meta(),
+                                         self._rec.two_tower_info())
                              + "\n\n" + discovery_text(self._rec.discovery_info()))
         self._nearest.setText(nearest_text(self._rec.nearest_words()))
 
