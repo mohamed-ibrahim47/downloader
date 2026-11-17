@@ -98,3 +98,40 @@ def test_json_roundtrip():
     assert back.vectors_at == 123.0
     u = m.user([cat], E)
     assert back.score(back.user([cat], E), back.item(["car"], E)) == pytest.approx(m.score(u, m.item(["car"], E)))
+
+
+def _row(vid, refresh, label, title):
+    from downloader.engine.recommend.dataset import Row
+    return Row(vid, [], label, 1.0, refresh, refresh, title)
+
+
+def test_examples_two_downloads_one_list():
+    rs = [_row("a", 10.0, 1, "cat one"), _row("b", 10.0, 1, "cat two"), _row("c", 10.0, 0, "car three")]
+    ex = twotower.examples(rs, [])
+    assert [e.cands[0] for e in ex] == [["cat", "one"], ["cat", "two"]]
+    assert ["cat", "two"] in ex[0].cands[1:] and ["cat", "one"] in ex[1].cands[1:]
+    assert all(len(e.cands) == 3 for e in ex)
+
+
+def test_examples_skip_untitled_list():
+    rs = [_row("a", 10.0, 1, "cat one"), _row("b", 10.0, 0, None), _row("c", 20.0, 1, "car")]
+    assert list(twotower.titled_lists(rs)) == [20.0]
+    assert [e.cands[0] for e in twotower.examples(rs, [])] == [["car"]]
+
+
+def test_examples_history_before_refresh_only():
+    history = [(float(i), [f"w{i}"]) for i in range(60)] + [(99.0, ["later"])]
+    ex = twotower.examples([_row("a", 70.0, 1, "cat"), _row("b", 70.0, 0, "car")], history)[0]
+    assert ["later"] not in ex.hist
+    assert len(ex.hist) == twotower.HISTORY and ex.hist[-1] == ["w59"] and ex.hist[0] == ["w10"]
+
+
+def test_examples_empty_history():
+    ex = twotower.examples([_row("a", 5.0, 1, "cat"), _row("b", 5.0, 0, "car")], [(9.0, ["later"])])
+    assert len(ex) == 1 and ex[0].hist == []
+
+
+def test_history_of_downloads_only():
+    from downloader.engine.recommend.profile import Profile, ProfileDoc
+    p = Profile([ProfileDoc("v1", "Cat", ["cat"], 1.0, added_at=5.0), ProfileDoc("v2", "Car", ["car"], -0.5)], {})
+    assert twotower.history_of(p) == [(5.0, ["cat"])]

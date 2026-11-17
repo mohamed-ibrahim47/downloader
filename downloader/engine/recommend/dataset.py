@@ -29,6 +29,7 @@ class Row:
     weight: float
     refresh: float  # which list it was shown in
     at: float
+    title: str | None = None  # v7 reads it; rows logged before titles were stored have None
 
 
 def rows(events: list[tuple], limit: int = MAX_ROWS, open_refresh: float | None = None,
@@ -73,5 +74,5 @@ def rows(events: list[tuple], limit: int = MAX_ROWS, open_refresh: float | None 
         x = from_logged(json.loads(features))
         if meaning is not None:
             x[8] = meaning(title or "", refresh)
-        out.append(Row(vid, x, label, weight, refresh, at))
+        out.append(Row(vid, x, label, weight, refresh, at, title))
     return out[-limit:]

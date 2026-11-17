@@ -114,3 +114,10 @@ def test_rows_recompute_meaning_by_title_and_refresh():
     assert [r.x[8] for r in got] == [0.25, 0.5]  # recomputed, even over a logged value
     assert ("title a", 1.0) in calls and ("title b", 1.0) in calls
     assert [r.x[8] for r in rows(titled)] == [0.9, 0.0]  # without a function: the logged value, or 0
+
+
+def test_rows_carry_title():
+    events = [(1, "a", "shown", F, 1.0, 1.0, "Cat videos"), (2, "b", "shown", F, 2.0, 1.0),
+              (3, "x", "shown", F, 3.0, 2.0, "newer")]
+    got = {r.video_id: r.title for r in rows(events)}
+    assert got == {"a": "Cat videos", "b": None}

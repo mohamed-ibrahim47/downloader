@@ -27,6 +27,10 @@ import math
 import random
 from dataclasses import asdict, dataclass
 
+from .dataset import Row
+from .profile import Profile
+from .text import tokenize
+
 HISTORY = 50  # newest downloads that make up "you"
 K = 16  # tower output size: 2 × (16·32 + 16) = 1,056 weights with 32-number word vectors
 LR = 0.05
@@ -218,3 +222,32 @@ def fit(examples: list[Example], E, k: int = K, epochs: int = EPOCHS, seed: int 
             step(m, vel, g, lr, mu)
     m.epochs = epochs
     return m
+
+
+# ---- training examples from the log (design A3) ----------------------------------------------
+
+def titled_lists(rows: list[Row]) -> dict[float, list[Row]]:
+    """Refresh -> its rows, only for lists where every row has a title (v7 can't read the others)."""
+    lists: dict[float, list[Row]] = {}
+    for r in rows:
+        lists.setdefault(r.refresh, []).append(r)
+    return {ref: rs for ref, rs in lists.items() if all(r.title for r in rs)}
+
+
+def history_of(profile: Profile) -> list[tuple[float, list[str]]]:
+    """(when, tokens) of every download in the profile (weight > 0; dismissals have negative weight)."""
+    return [(d.added_at, d.tokens) for d in profile.docs if d.weight > 0]
+
+
+def examples(rows: list[Row], history: list[tuple[float, list[str]]]) -> list[Example]:
+    """One example per download in a titled list: that video first, then every other video of the list.
+    "You" at that moment = the newest HISTORY downloads finished before the list was made."""
+    hist_sorted = sorted(history, key=lambda h: h[0])
+    out = []
+    for refresh, rs in titled_lists(rows).items():
+        hist = [tok for at, tok in hist_sorted if at < refresh][-HISTORY:]
+        toks = [tokenize(r.title) for r in rs]
+        for i, r in enumerate(rs):
+            if r.label == 1:
+                out.append(Example(hist=hist, cands=[toks[i]] + toks[:i] + toks[i + 1:]))
+    return out
