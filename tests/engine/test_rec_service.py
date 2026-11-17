@@ -729,3 +729,119 @@ def test_arms_are_not_recomputed_while_the_log_is_unchanged(rec, monkeypatch):
     rec.dismiss(_disc(rec.suggestions()))  # a new event: the arms must see it
     rec.discovery_info()
     assert len(reads) >= 2 and set(first) == {"channel", "newest", "words"}
+
+
+# ---- v7: the two-tower ranker behind its setting (design v7, A1, A4, A7) -------------------------
+
+from downloader.engine.recommend import twotower  # noqa: E402
+from downloader.engine.recommend.twotower import TwoTower  # noqa: E402
+
+
+def _tower_json(vectors_at=None):
+    # d = 3 (STARTER's size), k = 2: likes the piano direction, dislikes blank/space
+    m = TwoTower([[-1.0, 0.0, 2.0], [0.0, -1.0, 1.0]], [0.0, 0.0], [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]], [0.5, 0.5],
+                 vectors_at=vectors_at)
+    return m.to_json()
+
+
+def _save_v7(rec, store, **kw):
+    saved = rec.model()
+    store.set_setting("rec_two_tower_model", {"trained_at": saved["trained_at"],
+                                              "vectors_at": rec.vectors_meta().get("at"), "active": True,
+                                              "reason": "v7 beats v4", "ndcg": {"v7": 0.9, "v4": 0.5}, "lists": 3,
+                                              "model": _tower_json(), **kw})
+
+
+def test_two_tower_setting_default_off():
+    from downloader.engine.settings import Settings
+    assert Settings().rec_two_tower is False
+
+
+def test_setting_off_never_calls_twotower(rec, store, clock, with_starter, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("twotower ran with the setting off")
+    for name in ("contest", "fit", "examples", "history_of"):
+        monkeypatch.setattr(twotower, name, boom)
+    monkeypatch.setattr(TwoTower, "from_json", boom)
+    rec.refresh()
+    rec.suggestions()
+    clock.now += 7 * 3600
+    rec.refresh()
+    rec.suggestions()
+    assert store.get_setting("rec_two_tower_model") is None
+    assert rec.two_tower_info() is None
+
+
+def test_v7_ranks_when_saved_and_current(rec, store, with_starter):
+    _set(store, rec_two_tower=True)
+    rec.refresh()  # trains: rec_model gets its trained_at
+    _save_v7(rec, store)
+    assert rec.ranker() == "v7"
+    picks = rec.suggestions()
+    assert {f["ranker"] for f in _shown_features(store)} == {"v7"}
+    assert rec.two_tower_info()["reason"] == "v7 beats v4"
+    assert all(-1.0 <= x.score <= 1.0 for x in picks)  # u·v with k = 2 tanh outputs is within ±2; here ±1
+
+
+@pytest.mark.parametrize("off", ["rec_two_tower", "rec_learned", "rec_meaning"])
+def test_v7_off_at_once(rec, store, with_starter, off):
+    _set(store, rec_two_tower=True)
+    rec.refresh()
+    _save_v7(rec, store)
+    assert rec.ranker() == "v7"
+    _set(store, **{off: False})
+    assert rec.ranker() != "v7"
+
+
+def test_v7_steps_aside_after_vectors_retrain(rec, store, with_starter):
+    _set(store, rec_two_tower=True)
+    rec.refresh()
+    _save_v7(rec, store)
+    assert rec.ranker() == "v7"
+    store.set_setting("rec_vectors_meta", {"source": "own", "words": 6, "titles": 300, "at": 12345.0})
+    assert rec.ranker() != "v7"
+
+
+def test_v7_stale_after_newer_training(rec, store, with_starter):
+    _set(store, rec_two_tower=True)
+    rec.refresh()
+    _save_v7(rec, store)
+    assert rec.ranker() == "v7"
+    saved = rec.model()
+    store.set_setting("rec_model", {**saved, "trained_at": saved["trained_at"] + 1})
+    assert rec.ranker() != "v7"
+
+
+def test_v7_training_error_keeps_main_decision(rec, store, with_starter, monkeypatch):
+    _set(store, rec_two_tower=True)
+
+    def boom(*a, **k):
+        raise RuntimeError("bad batch")
+    monkeypatch.setattr(twotower, "contest", boom)
+    rec.refresh()
+    assert rec.model()["reason"].startswith("Learning")
+    info = rec.two_tower_info()
+    assert info["active"] is False and info["reason"] == "Training failed: bad batch"
+    assert info["trained_at"] == rec.model()["trained_at"]
+    assert rec.suggestions()
+
+
+def test_v7_without_meaning_says_why(rec, store, with_starter):
+    _set(store, rec_two_tower=True, rec_meaning=False)
+    rec.refresh()
+    info = rec.two_tower_info()
+    assert info["active"] is False and info["reason"] == "v7 needs Match by meaning"
+
+
+def test_v7_small_log_reason(rec, store, with_starter):
+    _set(store, rec_two_tower=True)
+    rec.refresh()
+    assert rec.two_tower_info()["reason"].startswith("Learning: 0 of 100 rows")
+
+
+def test_old_database_setting_on(rec, store, with_starter):
+    store.set_setting("rec_model", _model(-5.0))  # saved by 1.6.0: no v7 key
+    _set(store, rec_two_tower=True)
+    assert rec.ranker() == "v2"
+    assert rec.two_tower_info() is None
+    rec.suggestions()  # no candidates yet (no refresh): the point is that nothing raises

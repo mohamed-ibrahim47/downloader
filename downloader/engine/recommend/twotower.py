@@ -27,6 +27,7 @@ import math
 import random
 from dataclasses import asdict, dataclass
 
+from . import evaluate
 from .dataset import Row
 from .profile import Profile
 from .text import tokenize
@@ -251,3 +252,48 @@ def examples(rows: list[Row], history: list[tuple[float, list[str]]]) -> list[Ex
             if r.label == 1:
                 out.append(Example(hist=hist, cands=[toks[i]] + toks[:i] + toks[i + 1:]))
     return out
+
+
+# ---- the contest: does v7 beat the ranker on the page? (design A4, A7) -------------------------
+
+@dataclass
+class Contest:
+    lists: int  # titled test lists with a download
+    v7: float  # mean NDCG@10 on them
+    rival: float
+    wins: bool
+    reason: str  # in the owner's words
+
+
+def _ndcg_v7(m: TwoTower, E, lists: dict[float, list[Row]], history) -> float:
+    hist_sorted = sorted(history, key=lambda h: h[0])
+    total = 0.0
+    for refresh, rs in lists.items():
+        u = m.user([tok for at, tok in hist_sorted if at < refresh][-HISTORY:], E)
+        scored = sorted(rs, key=lambda r: (-m.score(u, m.item(tokenize(r.title), E)), r.video_id))
+        total += evaluate.ndcg_at([r.label for r in scored])
+    return total / len(lists) if lists else 0.0
+
+
+def contest(rows: list[Row], history, E, rival: str, models: dict) -> Contest:
+    """Train v7 on the older lists, then judge it and `rival` (the ranker `evaluate.choose` picked) on the
+    newest lists in which every video has a title. v7 must win outright: on a tie the rival stays."""
+    downloads = sum(r.label for r in rows)
+    if len(rows) < evaluate.MIN_ROWS or downloads < evaluate.MIN_DOWNLOADS:
+        return Contest(0, 0.0, 0.0, False, f"Learning: {len(rows)} of {evaluate.MIN_ROWS} rows, "
+                                           f"{downloads} of {evaluate.MIN_DOWNLOADS} downloads")
+    train, test = evaluate.split(rows)
+    judged = {ref: rs for ref, rs in titled_lists(test).items() if any(r.label for r in rs)}
+    if len(judged) < evaluate.MIN_TEST_LISTS:
+        return Contest(len(judged), 0.0, 0.0, False,
+                       f"Waiting for lists to test on: {len(judged)} of {evaluate.MIN_TEST_LISTS} recent lists "
+                       "with titles have a download")
+    ex = examples(train, history)
+    if not ex:
+        return Contest(len(judged), 0.0, 0.0, False, "Nothing to learn from yet: no older list with titles has a download")
+    m = fit(ex, E)
+    v7 = _ndcg_v7(m, E, judged, history)
+    rv = evaluate.rank_lists([r for rs in judged.values() for r in rs], models)[1].get(rival, 0.0)
+    if v7 > rv:
+        return Contest(len(judged), v7, rv, True, f"v7 beats {rival} on your newest lists (NDCG {v7:.2f} vs {rv:.2f})")
+    return Contest(len(judged), v7, rv, False, f"v7 didn't beat {rival} yet (NDCG {v7:.2f} vs {rv:.2f})")

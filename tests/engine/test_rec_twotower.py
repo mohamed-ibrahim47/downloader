@@ -135,3 +135,51 @@ def test_history_of_downloads_only():
     from downloader.engine.recommend.profile import Profile, ProfileDoc
     p = Profile([ProfileDoc("v1", "Cat", ["cat"], 1.0, added_at=5.0), ProfileDoc("v2", "Car", ["car"], -0.5)], {})
     assert twotower.history_of(p) == [(5.0, ["cat"])]
+
+
+# ---- the contest (design A4, A7) ----------------------------------------------------------------
+
+def _lists(n_lists=30, v1_right=False, untitled_tests=0):
+    """n_lists lists of 5; the owner always downloads the cat video. With v1_right, v1's similarity points at
+    it; otherwise v1 has no idea (all zero) and the tie order by id puts the cat video last."""
+    from downloader.engine.recommend.dataset import Row
+    rows = []
+    for n in range(n_lists):
+        refresh = 100.0 + n
+        for j, (vid, title) in enumerate((("a", "car engine"), ("b", "car race"), ("c", "car crash"),
+                                          ("d", "engine news"), ("z", "cat kitten"))):
+            x = [1.0 if (v1_right and vid == "z") else 0.0] + [0.0] * 8
+            untitled = n >= n_lists - untitled_tests and vid == "a"
+            rows.append(Row(f"{vid}{n}", x, int(vid == "z"), 1.0, refresh, refresh, None if untitled else title))
+    return rows
+
+
+def _words():
+    return Words({"cat": [1.0, 0.0], "kitten": [0.9, 0.1], "car": [0.0, 1.0], "engine": [0.1, 0.9],
+                  "race": [0.2, 0.8], "crash": [0.1, 0.7], "news": [0.3, 0.6]})
+
+
+HISTORY = [(1.0, ["cat"]), (2.0, ["kitten", "cat"])]
+
+
+def test_contest_wins_outright():
+    c = twotower.contest(_lists(), HISTORY, _words(), "v1", {})
+    assert c.wins and c.v7 > c.rival and c.lists == 6
+    assert c.reason == f"v7 beats v1 on your newest lists (NDCG {c.v7:.2f} vs {c.rival:.2f})"
+
+
+def test_contest_tie_keeps_rival():
+    c = twotower.contest(_lists(v1_right=True), HISTORY, _words(), "v1", {})
+    assert c.rival == pytest.approx(1.0) and not c.wins
+    assert c.reason.startswith("v7 didn't beat v1 yet")
+
+
+def test_contest_untitled_lists_left_out():
+    c = twotower.contest(_lists(untitled_tests=4), HISTORY, _words(), "v1", {})
+    assert c.lists == 2 and not c.wins
+    assert c.reason.startswith("Waiting for lists to test on: 2 of 3")
+
+
+def test_contest_size_gate_reason():
+    c = twotower.contest(_lists(n_lists=10), HISTORY, _words(), "v1", {})
+    assert not c.wins and c.reason == "Learning: 50 of 100 rows, 10 of 10 downloads"

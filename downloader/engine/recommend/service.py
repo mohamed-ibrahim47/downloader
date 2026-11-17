@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from .. import youtube
 from ..settings import Settings
 from ..store import Store
-from . import embed, evaluate, starter, starter_vectors
+from . import embed, evaluate, starter, starter_vectors, twotower
 from .bandit import arm_stats, pick_source, propensity
 from .bayes import Posterior, pick_contextual, posterior_from_rows
 from .candidates import Candidate, fetch, keep, plan
@@ -34,6 +34,7 @@ MODEL_KEY = "rec_model"  # settings key: the latest training, its evaluation, an
 VECTORS_KEY = "rec_vectors_meta"  # settings key: when the owner's own vectors were trained, on how many titles
 BANNER_KEY = "rec_meaning_banner"  # settings key: "done" once the owner closed the "match by meaning" banner
 BANDIT_KEY = "rec_bandit"  # settings key: the contextual bandit's posterior (v5), or the error that stopped it
+TWO_TOWER_KEY = "rec_two_tower_model"  # settings key: v7's latest training, its contest and weights (v7, A4)
 PICK_KEY = "rec_discovery_pick"  # settings key: this refresh's discovery pick, so a restart keeps it (v5, V1)
 RETRAIN_EVERY = 300  # new titles seen before the vectors are trained again on the owner's own titles
 
@@ -113,6 +114,7 @@ class Recommender:
         trained on all rows only when it won, for the number of passes its held-back run found.
         """
         with self._training:
+            now = self._clock()  # one stamp for rec_model and v7's model: v7 ranks only beside its own run
             settings = Settings.load(self.store)
             events = self.log.events()
             vectors = self.vectors() if settings.rec_meaning else None
@@ -144,8 +146,47 @@ class Recommender:
                            "ndcg": rep.ndcg, "hit3": rep.hit3, "auc": rep.auc, "log_loss": rep.log_loss,
                            "v3_auc": rep.v3_auc, "v3_log_loss": rep.v3_log_loss,
                            "v3_epochs": rep.net.epochs if rep.net else 0},
-                "trained_at": self._clock()})
+                "trained_at": now})
             self._train_bandit(rows)
+            if settings.rec_two_tower:  # off: v7's code never runs (design A1)
+                self._train_two_tower(rows, rep, ranker, now, vectors, settings)
+
+    def _train_two_tower(self, rows, rep, rival: str, now: float, vectors, settings: Settings) -> None:
+        """v7 against the ranker this run picked, on the newest titled lists (design A4, A7). Never raises."""
+        out = {"trained_at": now, "vectors_at": self.vectors_meta().get("at") if vectors else None,
+               "active": False, "reason": "v7 needs Match by meaning", "ndcg": {}, "lists": 0, "model": None}
+        if vectors is not None:
+            try:
+                profile = build_profile(self.store.all(), [], now, files=settings.rec_files)
+                history = twotower.history_of(profile)
+                models = {"v2": rep.weights, "v3": rep.net, "mix": starter_vectors.MEANING_MIX}
+                c = twotower.contest(rows, history, vectors, rival, {k: v for k, v in models.items() if v is not None})
+                out.update(reason=c.reason, lists=c.lists, ndcg={"v7": c.v7, rival: c.rival} if c.lists else {})
+                if c.wins:  # the final v7 learns from every titled list, as v2/v3 do after winning
+                    m = twotower.fit(twotower.examples(rows, history), vectors)
+                    m.vectors_at = out["vectors_at"]
+                    out.update(active=True, model=m.to_json())
+            except Exception as e:  # a training bug must never take the page down
+                out.update(active=False, model=None, reason=f"Training failed: {e}")
+        self.store.set_setting(TWO_TOWER_KEY, out)
+
+    def two_tower_info(self) -> dict | None:
+        """v7's latest training for "Why this order?"; None when its setting is off."""
+        if not Settings.load(self.store).rec_two_tower:
+            return None
+        return self.store.get_setting(TWO_TOWER_KEY)
+
+    def _two_tower(self, settings: Settings, saved: dict, meaning: bool) -> "twotower.TwoTower | None":
+        """The saved v7, only while it is current: its setting and meaning on, trained in the same run as
+        rec_model, and on the word vectors in use now (design A7)."""
+        if not settings.rec_two_tower or not meaning:
+            return None
+        s7 = self.store.get_setting(TWO_TOWER_KEY)
+        if not s7 or not s7.get("active") or not s7.get("model"):
+            return None
+        if s7.get("trained_at") != saved.get("trained_at") or s7.get("vectors_at") != self.vectors_meta().get("at"):
+            return None
+        return twotower.TwoTower.from_json(s7["model"])
 
     def _train_bandit(self, rows) -> None:
         """The contextual bandit's belief, from the same rows (meaning already recomputed). Never raises:
@@ -349,6 +390,9 @@ class Recommender:
             first = "v1"
         if not settings.rec_learned:
             return first, None
+        v7 = self._two_tower(settings, saved, meaning)
+        if v7 is not None:
+            return "v7", v7
         if saved.get("active") and not _current_inputs(saved):
             return first, None  # saved by an older version with other inputs: the base until the next training
         if saved.get("active"):
@@ -362,7 +406,7 @@ class Recommender:
         return first, None
 
     def ranker(self) -> str:
-        """"v1", "v4", "v2", "v3", "starter-v2" or "starter-v3"."""
+        """"v1", "v4", "v2", "v3", "v7", "starter-v2" or "starter-v3"."""
         return self._learned()[0]
 
     def view(self, k: int = TOP_K, words: int = 0, log: bool = True) -> View:
@@ -381,7 +425,11 @@ class Recommender:
         name, m = self._learned()
         vectors = self.vectors() if Settings.load(self.store).rec_meaning else None
         index = self._meaning_index(profile, cands, vectors, model.idf) if vectors is not None else None
-        if m is not None:
+        if name == "v7":
+            hist = [tok for _at, tok in sorted(twotower.history_of(profile), key=lambda h: h[0])]
+            u = m.user(hist, vectors)
+            scorer = lambda s, _affinity: m.score(u, m.item(tokenize(s.candidate.title), vectors))  # noqa: E731
+        elif m is not None:
             scorer = lambda s, affinity: m.prob(from_suggestion(s, affinity))  # noqa: E731
         elif name == "v4":
             scorer = lambda s, affinity: v4_score(s.similarity, s.meaning, affinity,  # noqa: E731
