@@ -29,7 +29,9 @@ import math
 import random
 from dataclasses import asdict, dataclass, field
 
-from .twotower import title_vec
+from .dataset import Row
+from .text import tokenize
+from .twotower import title_vec, titled_lists
 
 HISTORY = 20  # L: the newest downloads read as a sequence (attention costs grow with L², and this is plain Python)
 K = 16  # model width
@@ -390,3 +392,26 @@ def fit(examples: list[Example], E, k: int = K, L: int = HISTORY, epochs: int | 
             step(m, vel, g, lr, mu)
     m.epochs = epochs
     return m
+
+
+# ---- training examples from the log (design A3) ----------------------------------------------
+
+def examples(rows: list[Row], history: list[tuple[float, list[str]]], rng: random.Random) -> list[Example]:
+    """v7's examples (one per download in a titled list, the rest of that list as the "no"s), read in order:
+    the history is the newest HISTORY downloads finished before the list, oldest first. For the next-download
+    task, step t gets up to NEG_SEQ wrong answers drawn (without replacement) from the videos you were shown and
+    didn't download, anywhere in the log, never the download that really came next."""
+    hist_sorted = sorted(history, key=lambda h: h[0])
+    pool = sorted({tuple(tokenize(r.title)) for r in rows if r.label == 0 and r.title})
+    out = []
+    for refresh, rs in titled_lists(rows).items():
+        hist = [tok for at, tok in hist_sorted if at < refresh][-HISTORY:]
+        negs = []
+        for t in range(len(hist) - 1):
+            options = [list(x) for x in pool if list(x) != hist[t + 1]]
+            negs.append(rng.sample(options, min(NEG_SEQ, len(options))))
+        negatives = [tokenize(r.title) for r in rs if r.label == 0]
+        for r in rs:
+            if r.label == 1:
+                out.append(Example(hist=hist, cands=[tokenize(r.title)] + negatives, seq_negs=negs))
+    return out
