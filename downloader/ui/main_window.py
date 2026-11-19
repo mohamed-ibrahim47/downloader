@@ -352,7 +352,8 @@ class MainWindow(QMainWindow):
         trainer_changed = (settings.rec_trainer != self.settings.rec_trainer
                            or settings.rec_meaning != self.settings.rec_meaning
                            or settings.rec_files != self.settings.rec_files
-                           or settings.rec_two_tower != self.settings.rec_two_tower)
+                           or settings.rec_two_tower != self.settings.rec_two_tower
+                           or settings.rec_sasrec != self.settings.rec_sasrec)
         discovery_changed = settings.rec_discovery != self.settings.rec_discovery
         self.settings = settings
         settings.save(self.store)

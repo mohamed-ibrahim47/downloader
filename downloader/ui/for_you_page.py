@@ -78,15 +78,18 @@ ACTIVATION_NAMES = {"relu": "ReLU", "leaky_relu": "leaky ReLU", "tanh": "tanh", 
 
 
 def ranker_text(model: dict | None, ranker: str, vectors_meta: dict | None = None,
-                two_tower: dict | None = None) -> str:
+                two_tower: dict | None = None, sasrec: dict | None = None, leaned_on: str | None = None) -> str:
     """The "Why this order?" block: which ranker is on, how learning goes, and the learned weights.
 
     `two_tower`: v7's latest training (`Recommender.two_tower_info()`); None when its setting is off, and
-    then nothing about v7 is shown."""
+    then nothing about v7 is shown. `sasrec`: v8's, the same way (`Recommender.sasrec_info()`); `leaned_on`: the
+    past download v8's newest step attended to most (`View.leaned_on`), shown while v8 ranks."""
     lines = []
     weights = Weights.from_json(model["weights"]) if model and model.get("weights") else None
     net = Net.from_json(model["net"]) if model and model.get("net") else None
-    if ranker == "v7":
+    if ranker == "v8":
+        lines.append("Ranked by: Sequence (v8), learned from your lists")
+    elif ranker == "v7":
         lines.append("Ranked by: Two-tower (v7), learned from your lists")
     elif ranker == "v3" and net:
         shape = f"{len(net.names)} → {len(net.W1)} → 1, {ACTIVATION_NAMES.get(net.activation, net.activation)}"
@@ -117,6 +120,15 @@ def ranker_text(model: dict | None, ranker: str, vectors_meta: dict | None = Non
         rival = next((k for k in nd if k != "v7"), None)
         if "v7" in nd and rival:
             lines.append(f"v7 NDCG@10 {nd['v7']:.2f} vs {rival} {nd[rival]:.2f}")
+    if sasrec:
+        why = sasrec.get("reason", "")
+        lines.append(why if ranker == "v8" else f"Sequence (v8): {why}")
+        nd = sasrec.get("ndcg") or {}
+        rival = next((k for k in nd if k != "v8"), None)
+        if "v8" in nd and rival:
+            lines.append(f"v8 NDCG@10 {nd['v8']:.2f} vs {rival} {nd[rival]:.2f}")
+        if ranker == "v8" and leaned_on:
+            lines.append(f"Leaned most on: {leaned_on}")
     compare = {name: Weights.from_json(text) for name, text in (model or {}).get("compare", {}).items()}
     if compare:
         names = [n for n in ("hand", "sklearn") if n in compare]
@@ -376,6 +388,7 @@ class ForYouPage(QWidget):
             self._show_cold()
             return
         self._shown = view.suggestions
+        self._leaned_on = view.leaned_on
         self._clear_cards()
         for s in self._shown:
             card = SuggestionCard(s, why)
@@ -404,7 +417,8 @@ class ForYouPage(QWidget):
 
     def _set_ranker(self) -> None:
         self._ranker.setText(ranker_text(self._rec.model(), self._rec.ranker(), self._rec.vectors_meta(),
-                                         self._rec.two_tower_info())
+                                         self._rec.two_tower_info(), self._rec.sasrec_info(),
+                                         getattr(self, "_leaned_on", None))
                              + "\n\n" + discovery_text(self._rec.discovery_info()))
         self._nearest.setText(nearest_text(self._rec.nearest_words()))
 

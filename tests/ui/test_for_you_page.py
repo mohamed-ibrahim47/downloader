@@ -481,3 +481,34 @@ def test_two_tower_card_text_is_a_score_not_a_chance():
     c = Candidate("v", "u", "t", "ch", 100, "q")
     text = _score_text(Suggestion(c, 3.4, 0.2, 0.1, None, [], two_tower=True))
     assert text.startswith("score 3.40 (two-tower)") and "chance" not in text and "%" not in text
+
+
+V8 = {"trained_at": 1.0, "vectors_at": None, "active": True, "rival": "v7",
+      "reason": "v8 beats v7 on your newest lists (NDCG 0.64 vs 0.61)", "ndcg": {"v8": 0.64, "v7": 0.61}, "lists": 4,
+      "model": "{}"}
+
+
+def test_ranker_text_v8():
+    from downloader.ui.for_you_page import ranker_text
+    model = {"active": False, "reason": "Learning: 50 of 100 rows", "report": {}, "compare": {}}
+    lines = ranker_text(model, "v8", None, V7, sasrec=V8, leaned_on="Blank Space live").splitlines()
+    assert lines[0] == "Ranked by: Sequence (v8), learned from your lists"
+    assert "v8 beats v7 on your newest lists (NDCG 0.64 vs 0.61)" in lines
+    assert "v8 NDCG@10 0.64 vs v7 0.61" in lines
+    assert "Leaned most on: Blank Space live" in lines
+
+
+def test_ranker_text_v8_not_ranking():
+    from downloader.ui.for_you_page import ranker_text
+    info = {**V8, "active": False, "reason": "v8 didn't beat v2 yet (NDCG 0.40 vs 0.55)",
+            "ndcg": {"v8": 0.40, "v2": 0.55}}
+    text = ranker_text({"active": False, "reason": "x", "report": {}, "compare": {}}, "v2", None, None,
+                       sasrec=info, leaned_on=None)
+    assert "Sequence (v8): v8 didn't beat v2 yet (NDCG 0.40 vs 0.55)" in text
+    assert "Leaned most on" not in text
+
+
+def test_ranker_text_v8_off():
+    from downloader.ui.for_you_page import ranker_text
+    text = ranker_text({"active": False, "reason": "x", "report": {}, "compare": {}}, "v1", None, None, sasrec=None)
+    assert "v8" not in text
