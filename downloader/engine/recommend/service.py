@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from .. import youtube
 from ..settings import Settings
 from ..store import Store
-from . import embed, evaluate, starter, starter_vectors, twotower
+from . import embed, evaluate, sasrec, starter, starter_vectors, twotower
 from .bandit import arm_stats, pick_source, propensity
 from .bayes import Posterior, pick_contextual, posterior_from_rows
 from .candidates import Candidate, fetch, keep, plan
@@ -35,6 +35,7 @@ VECTORS_KEY = "rec_vectors_meta"  # settings key: when the owner's own vectors w
 BANNER_KEY = "rec_meaning_banner"  # settings key: "done" once the owner closed the "match by meaning" banner
 BANDIT_KEY = "rec_bandit"  # settings key: the contextual bandit's posterior (v5), or the error that stopped it
 TWO_TOWER_KEY = "rec_two_tower_model"  # settings key: v7's latest training, its contest and weights (v7, A4)
+SASREC_KEY = "rec_sasrec_model"  # settings key: v8's latest training, its contest and weights (v8, A4)
 PICK_KEY = "rec_discovery_pick"  # settings key: this refresh's discovery pick, so a restart keeps it (v5, V1)
 RETRAIN_EVERY = 300  # new titles seen before the vectors are trained again on the owner's own titles
 
@@ -45,6 +46,7 @@ class View:
     ready: bool
     suggestions: list[Suggestion] = field(default_factory=list)
     words: list[tuple[str, float]] = field(default_factory=list)
+    leaned_on: str | None = None  # v8 only: the past download its newest step attended to most
 
 
 class Recommender:
@@ -151,12 +153,19 @@ class Recommender:
                            "v3_epochs": rep.net.epochs if rep.net else 0},
                 "trained_at": now})
             self._train_bandit(rows)
+            c7 = None
             if settings.rec_two_tower:  # off: v7's code never runs (design A1)
-                self._train_two_tower(rows, rep, ranker, now, vectors, vectors_at, settings)
+                c7 = self._train_two_tower(rows, rep, ranker, now, vectors, vectors_at, settings)
+            if settings.rec_sasrec:  # off: v8's code never runs (design v8, A1)
+                won7 = c7 is not None and c7.wins and bool((self.store.get_setting(TWO_TOWER_KEY) or {}).get("active"))
+                self._train_sasrec(rows, rep, "v7" if won7 else ranker, now, vectors, vectors_at, settings,
+                                   c7.model if won7 else None)
 
-    def _train_two_tower(self, rows, rep, rival: str, now: float, vectors, vectors_at, settings: Settings) -> None:
+    def _train_two_tower(self, rows, rep, rival: str, now: float, vectors, vectors_at,
+                         settings: Settings) -> "twotower.Contest | None":
         """v7 against the ranker this run picked, on the newest titled lists (design A4, A7). Never raises.
-        `vectors_at`: the stamp read when `train()` took `vectors`."""
+        `vectors_at`: the stamp read when `train()` took `vectors`. Returns the contest (v8 re-scores its v7)."""
+        c = None
         out = {"trained_at": now, "vectors_at": vectors_at if vectors else None,
                "active": False, "reason": "v7 needs Match by meaning", "ndcg": {}, "lists": 0, "model": None}
         if vectors is not None:
@@ -172,7 +181,48 @@ class Recommender:
                     out.update(active=True, model=m.to_json())
             except Exception as e:  # a training bug must never take the page down
                 out.update(active=False, model=None, reason=f"Training failed: {e}")
+                c = None
         self.store.set_setting(TWO_TOWER_KEY, out)
+        return c
+
+    def _train_sasrec(self, rows, rep, rival: str, now: float, vectors, vectors_at, settings: Settings,
+                      v7: "twotower.TwoTower | None") -> None:
+        """v8 against the ranker that would otherwise rank (v7 when v7 won this run), on the same newest titled
+        lists (design v8, A4). Never raises."""
+        out = {"trained_at": now, "vectors_at": vectors_at if vectors else None, "active": False,
+               "reason": "v8 needs Match by meaning", "ndcg": {}, "lists": 0, "rival": rival, "model": None}
+        if vectors is not None:
+            try:
+                profile = build_profile(self.store.all(), [], now, files=settings.rec_files)
+                history = twotower.history_of(profile)
+                models = {"v2": rep.weights, "v3": rep.net, "mix": starter_vectors.MEANING_MIX}
+                c = sasrec.contest(rows, history, vectors, rival, {k: v for k, v in models.items() if v is not None},
+                                   v7=v7)
+                out.update(reason=c.reason, lists=c.lists, ndcg={"v8": c.v8, rival: c.rival} if c.lists else {})
+                if c.wins:  # the final v8 learns from every titled list
+                    m = sasrec.fit(sasrec.examples(rows, history, random.Random(0)), vectors)
+                    m.vectors_at = out["vectors_at"]
+                    out.update(active=True, model=m.to_json())
+            except Exception as e:  # a training bug must never take the page down
+                out.update(active=False, model=None, reason=f"Training failed: {e}")
+        self.store.set_setting(SASREC_KEY, out)
+
+    def sasrec_info(self) -> dict | None:
+        """v8's latest training for "Why this order?"; None when its setting is off."""
+        if not Settings.load(self.store).rec_sasrec:
+            return None
+        return self.store.get_setting(SASREC_KEY)
+
+    def _sasrec(self, settings: Settings, saved: dict, meaning: bool) -> "sasrec.SasRec | None":
+        """The saved v8, only while it is current (the same rules as v7's, design v7 A7)."""
+        if not settings.rec_sasrec or not meaning:
+            return None
+        s8 = self.store.get_setting(SASREC_KEY)
+        if not s8 or not s8.get("active") or not s8.get("model"):
+            return None
+        if s8.get("trained_at") != saved.get("trained_at") or s8.get("vectors_at") != self.vectors_meta().get("at"):
+            return None
+        return sasrec.SasRec.from_json(s8["model"])
 
     def two_tower_info(self) -> dict | None:
         """v7's latest training for "Why this order?"; None when its setting is off."""
@@ -394,6 +444,9 @@ class Recommender:
             first = "v1"
         if not settings.rec_learned:
             return first, None
+        v8 = self._sasrec(settings, saved, meaning)  # it beat whatever else would rank, v7 included
+        if v8 is not None:
+            return "v8", v8
         v7 = self._two_tower(settings, saved, meaning)
         if v7 is not None:
             return "v7", v7
@@ -410,7 +463,7 @@ class Recommender:
         return first, None
 
     def ranker(self) -> str:
-        """"v1", "v4", "v2", "v3", "v7", "starter-v2" or "starter-v3"."""
+        """"v1", "v4", "v2", "v3", "v7", "v8", "starter-v2" or "starter-v3"."""
         return self._learned()[0]
 
     def view(self, k: int = TOP_K, words: int = 0, log: bool = True) -> View:
@@ -429,10 +482,16 @@ class Recommender:
         name, m = self._learned()
         vectors = self.vectors() if Settings.load(self.store).rec_meaning else None
         index = self._meaning_index(profile, cands, vectors, model.idf) if vectors is not None else None
-        if name == "v7":
-            hist = [tok for _at, tok in sorted(twotower.history_of(profile), key=lambda h: h[0])]
+        leaned_on = None
+        if name in ("v7", "v8"):
+            past = sorted((d for d in profile.docs if d.weight > 0), key=lambda d: d.added_at)  # oldest first
+            hist = [d.tokens for d in past]
             u = m.user(hist, vectors)
             scorer = lambda s, _affinity: m.score(u, m.item(tokenize(s.candidate.title), vectors))  # noqa: E731
+            if name == "v8" and past:
+                a = m.attention(hist, vectors)  # over the newest L, oldest first
+                read = past[-len(a):]
+                leaned_on = read[max(range(len(a)), key=lambda i: (a[i], i))].title  # ties: the newest
         elif m is not None:
             scorer = lambda s, affinity: m.prob(from_suggestion(s, affinity))  # noqa: E731
         elif name == "v4":
@@ -444,7 +503,7 @@ class Recommender:
         picks = rank(profile, cands, k, self._rng, discovery_id=self._discovery, model=model, scorer=scorer,
                      meaning=index, choose=choose)
         self._remember_pick(picks)
-        if name == "v7":
+        if name in ("v7", "v8"):
             for s in picks:
                 s.learned, s.two_tower = False, True  # u·v is a match score, not a probability
         if name == "v4":
@@ -453,7 +512,7 @@ class Recommender:
         self._discovery = next((s.candidate.video_id for s in picks if s.discovery), self._discovery)
         if log:
             self._log_shown(picks, profile, name)
-        return View(True, picks, profile_words(profile, cands, words, model=model) if words else [])
+        return View(True, picks, profile_words(profile, cands, words, model=model) if words else [], leaned_on)
 
     def _meaning_index(self, profile: Profile, cands, vectors: embed.Vectors, idf) -> MeaningIndex:
         """The meaning index, built again only when the downloads, dismissals, candidates or vectors change.

@@ -37,6 +37,7 @@ class Settings:
     rec_files: bool = True  # For you: "Use file downloads for suggestions" (programs, archives, course videos)
     rec_discovery: str = "source"  # For you: "Discovery card", one of DISCOVERY_MODES
     rec_two_tower: bool = False  # For you: "Try the two-tower ranker (v7, experimental)"; off = v7 never runs
+    rec_sasrec: bool = False  # For you: "Try the sequence ranker (v8, experimental)"; off = v8 never runs
     schedule: Schedule = field(default_factory=Schedule)
 
     @property

@@ -194,3 +194,65 @@ def test_seq_negs_few_titles():
 def test_examples_empty_history():
     ex = sasrec.examples(_log(), [], random.Random(0))
     assert len(ex) == 2 and ex[0].hist == [] and ex[0].seq_negs == []
+
+
+# ---- the contest (Task 6, design A4) ----------------------------------------------------------
+
+import pytest  # noqa: E402
+
+from downloader.engine.recommend import evaluate  # noqa: E402
+
+
+def _lists(n_lists=30, v1_right=False, untitled_tests=0):
+    """As v7's contest tests: lists of 5, the owner always downloads the cat video."""
+    rows = []
+    for n in range(n_lists):
+        refresh = 100.0 + n
+        for vid, title in (("a", "car engine"), ("b", "car race"), ("c", "car crash"), ("d", "engine news"),
+                           ("z", "cat kitten")):
+            x = [1.0 if (v1_right and vid == "z") else 0.0] + [0.0] * 8
+            untitled = n >= n_lists - untitled_tests and vid == "a"
+            rows.append(Row(f"{vid}{n}", x, int(vid == "z"), 1.0, refresh, refresh, None if untitled else title))
+    return rows
+
+
+def _words():
+    return Words({"cat": [1.0, 0.0], "kitten": [0.9, 0.1], "car": [0.0, 1.0], "engine": [0.1, 0.9],
+                  "race": [0.2, 0.8], "crash": [0.1, 0.7], "news": [0.3, 0.6]})
+
+
+CAT_HISTORY = [(1.0, ["cat"]), (2.0, ["kitten", "cat"])]
+
+
+def test_contest_wins_outright():
+    c = sasrec.contest(_lists(), CAT_HISTORY, _words(), "v1", {})
+    assert c.wins and c.v8 > c.rival and c.lists == 6
+    assert c.reason == f"v8 beats v1 on your newest lists (NDCG {c.v8:.2f} vs {c.rival:.2f})"
+
+
+def test_contest_tie_keeps_rival():
+    c = sasrec.contest(_lists(v1_right=True), CAT_HISTORY, _words(), "v1", {})
+    assert c.rival == pytest.approx(1.0) and not c.wins
+    assert c.reason.startswith("v8 didn't beat v1 yet")
+
+
+def test_contest_rival_v7_scored_on_same_lists():
+    rows, E = _lists(), _words()
+    c7 = twotower.contest(rows, CAT_HISTORY, E, "v1", {})
+    assert c7.model is not None
+    c = sasrec.contest(rows, CAT_HISTORY, E, "v7", {}, v7=c7.model)
+    judged = {ref: rs for ref, rs in twotower.titled_lists(evaluate.split(rows)[1]).items()
+              if any(r.label for r in rs)}
+    assert c.rival == pytest.approx(twotower.ndcg(c7.model, E, judged, CAT_HISTORY))
+    assert c.lists == len(judged) == 6
+
+
+def test_contest_size_gate_reason():
+    c = sasrec.contest(_lists(n_lists=10), CAT_HISTORY, _words(), "v1", {})
+    assert not c.wins and c.reason == "Learning: 50 of 100 rows, 10 of 10 downloads"
+
+
+def test_contest_untitled_lists_left_out():
+    c = sasrec.contest(_lists(untitled_tests=4), CAT_HISTORY, _words(), "v1", {})
+    assert c.lists == 2 and not c.wins
+    assert c.reason.startswith("Waiting for lists to test on: 2 of 3")

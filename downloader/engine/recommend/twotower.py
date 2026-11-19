@@ -264,9 +264,10 @@ class Contest:
     rival: float
     wins: bool
     reason: str  # in the owner's words
+    model: TwoTower | None = None  # the v7 trained on the older lists (v8's contest re-scores it, design v8 A4)
 
 
-def _ndcg_v7(m: TwoTower, E, lists: dict[float, list[Row]], history) -> float:
+def ndcg(m: TwoTower, E, lists: dict[float, list[Row]], history) -> float:
     hist_sorted = sorted(history, key=lambda h: h[0])
     total = 0.0
     for refresh, rs in lists.items():
@@ -293,8 +294,9 @@ def contest(rows: list[Row], history, E, rival: str, models: dict) -> Contest:
     if not ex:
         return Contest(len(judged), 0.0, 0.0, False, "Nothing to learn from yet: no older list with titles has a download")
     m = fit(ex, E)
-    v7 = _ndcg_v7(m, E, judged, history)
+    v7 = ndcg(m, E, judged, history)
     rv = evaluate.rank_lists([r for rs in judged.values() for r in rs], models)[1].get(rival, 0.0)
     if v7 > rv:
-        return Contest(len(judged), v7, rv, True, f"v7 beats {rival} on your newest lists (NDCG {v7:.2f} vs {rv:.2f})")
-    return Contest(len(judged), v7, rv, False, f"v7 didn't beat {rival} yet (NDCG {v7:.2f} vs {rv:.2f})")
+        return Contest(len(judged), v7, rv, True, f"v7 beats {rival} on your newest lists (NDCG {v7:.2f} vs {rv:.2f})",
+                       model=m)
+    return Contest(len(judged), v7, rv, False, f"v7 didn't beat {rival} yet (NDCG {v7:.2f} vs {rv:.2f})", model=m)

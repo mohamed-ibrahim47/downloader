@@ -871,3 +871,145 @@ def test_v7_stamp_is_the_vectors_it_trained_on(rec, store, with_starter, monkeyp
     info = rec.two_tower_info()
     assert info["active"] and info["vectors_at"] is None
     assert rec.ranker() != "v7"
+
+
+# ---- v8: the sequence ranker behind its setting (design v8, A1, A4) -------------------------------
+
+import random as _random  # noqa: E402
+
+from downloader.engine.recommend import sasrec  # noqa: E402
+from downloader.engine.recommend.sasrec import SasRec  # noqa: E402
+
+
+def _sasrec_json():
+    return sasrec.init(d=3, k=2, L=4, rng=_random.Random(0)).to_json()  # d = 3: STARTER's size
+
+
+def _save_v8(rec, store, **kw):
+    saved = rec.model()
+    store.set_setting("rec_sasrec_model", {"trained_at": saved["trained_at"],
+                                           "vectors_at": rec.vectors_meta().get("at"), "active": True,
+                                           "reason": "v8 beats v4", "ndcg": {"v8": 0.9, "v4": 0.5}, "lists": 3,
+                                           "rival": "v4", "model": _sasrec_json(), **kw})
+
+
+def test_sasrec_setting_default_off():
+    from downloader.engine.settings import Settings
+    assert Settings().rec_sasrec is False
+
+
+def test_setting_off_never_calls_sasrec(rec, store, clock, with_starter, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("sasrec ran with the setting off")
+    for name in ("contest", "fit", "examples"):
+        monkeypatch.setattr(sasrec, name, boom)
+    monkeypatch.setattr(SasRec, "from_json", boom)
+    rec.refresh()
+    rec.suggestions()
+    clock.now += 7 * 3600
+    rec.refresh()
+    rec.suggestions()
+    assert store.get_setting("rec_sasrec_model") is None
+    assert rec.sasrec_info() is None
+
+
+def test_v8_ranks_when_saved_and_current(rec, store, with_starter):
+    _add_titles(store, 3)
+    _set(store, rec_sasrec=True)
+    rec.refresh()
+    _save_v8(rec, store)
+    assert rec.ranker() == "v8"
+    view = rec.view()
+    assert view.suggestions and all(x.two_tower and not x.learned for x in view.suggestions)
+    assert {f["ranker"] for f in _shown_features(store)} == {"v8"}
+    titles = {d.title for d in store.all()}
+    assert view.leaned_on in titles
+    assert rec.sasrec_info()["reason"] == "v8 beats v4"
+
+
+def test_v8_before_v7(rec, store, with_starter):
+    _set(store, rec_sasrec=True, rec_two_tower=True)
+    rec.refresh()
+    _save_v7(rec, store)
+    _save_v8(rec, store, rival="v7")
+    assert rec.ranker() == "v8"
+    _set(store, rec_two_tower=False)  # v8 beat v7, which beat the pick, on the same lists
+    assert rec.ranker() == "v8"
+
+
+@pytest.mark.parametrize("off", ["rec_sasrec", "rec_learned", "rec_meaning"])
+def test_v8_off_at_once(rec, store, with_starter, off):
+    _set(store, rec_sasrec=True)
+    rec.refresh()
+    before = rec.ranker()
+    _save_v8(rec, store)
+    assert rec.ranker() == "v8"
+    _set(store, **{off: False})
+    assert rec.ranker() != "v8"
+    if off == "rec_sasrec":
+        assert rec.ranker() == before  # 1.7.0's answer, no retraining
+
+
+def test_v8_steps_aside_after_vectors_retrain(rec, store, with_starter):
+    _set(store, rec_sasrec=True)
+    rec.refresh()
+    _save_v8(rec, store)
+    assert rec.ranker() == "v8"
+    store.set_setting("rec_vectors_meta", {"source": "own", "words": 6, "titles": 300, "at": 12345.0})
+    assert rec.ranker() != "v8"
+
+
+def test_v8_stale_after_newer_training(rec, store, with_starter):
+    _set(store, rec_sasrec=True)
+    rec.refresh()
+    _save_v8(rec, store)
+    assert rec.ranker() == "v8"
+    saved = rec.model()
+    store.set_setting("rec_model", {**saved, "trained_at": saved["trained_at"] + 1})
+    assert rec.ranker() != "v8"
+
+
+def test_v8_training_error_keeps_other_decisions(rec, store, with_starter, monkeypatch):
+    _set(store, rec_sasrec=True, rec_two_tower=True)
+
+    def boom(*a, **k):
+        raise RuntimeError("bad step")
+    monkeypatch.setattr(sasrec, "contest", boom)
+    rec.refresh()
+    assert rec.model()["reason"].startswith("Learning")
+    assert rec.two_tower_info()["reason"].startswith("Learning")
+    info = rec.sasrec_info()
+    assert info["active"] is False and info["reason"] == "Training failed: bad step"
+    assert info["trained_at"] == rec.model()["trained_at"]
+    assert rec.suggestions()
+
+
+def test_v8_without_meaning_says_why(rec, store, with_starter):
+    _set(store, rec_sasrec=True, rec_meaning=False)
+    rec.refresh()
+    info = rec.sasrec_info()
+    assert info["active"] is False and info["reason"] == "v8 needs Match by meaning"
+
+
+def test_v8_rival_is_v7_when_v7_won(rec, store, with_starter, monkeypatch):
+    _set(store, rec_sasrec=True, rec_two_tower=True)
+    split7 = twotower.init(3, 2, _random.Random(0))
+    monkeypatch.setattr(twotower, "contest",
+                        lambda *a, **k: twotower.Contest(3, 0.9, 0.5, True, "v7 beats v4", model=split7))
+    seen = {}
+
+    def fake(rows, history, E, rival, models, v7=None):
+        seen.update(rival=rival, v7=v7)
+        return sasrec.Contest(3, 0.4, 0.9, False, "v8 didn't beat v7 yet (NDCG 0.40 vs 0.90)")
+    monkeypatch.setattr(sasrec, "contest", fake)
+    rec.refresh()
+    assert seen == {"rival": "v7", "v7": split7}
+    assert rec.sasrec_info()["rival"] == "v7"
+
+
+def test_old_database_sasrec_on(rec, store, with_starter):
+    store.set_setting("rec_model", _model(-5.0))  # saved by 1.7.0: no v8 key
+    _set(store, rec_sasrec=True)
+    assert rec.ranker() == "v2"
+    assert rec.sasrec_info() is None
+    rec.suggestions()
