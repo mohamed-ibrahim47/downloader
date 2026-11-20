@@ -89,18 +89,20 @@ class SasRec:
     def item(self, tokens: list[str], E) -> list[float]:
         return _tower(self.wi, self.bi, title_vec(tokens, E))
 
-    def user(self, hist: list[list[str]], E) -> list[float]:
+    def user_and_attention(self, hist: list[list[str]], E) -> tuple[list[float], list[float]]:
+        """u, and the newest step's attention over the history (oldest first), from one forward pass."""
         hist = hist[-self.L:] if hist else []
         if not hist:
-            return [0.0] * self.k
-        return _forward(self, [self.item(t, E) for t in hist])["F"][-1]
+            return [0.0] * self.k, []
+        fw = _forward(self, [self.item(t, E) for t in hist])
+        return fw["F"][-1], fw["A"][-1]
+
+    def user(self, hist: list[list[str]], E) -> list[float]:
+        return self.user_and_attention(hist, E)[0]
 
     def attention(self, hist: list[list[str]], E) -> list[float]:
         """The newest step's attention over the history (oldest first): which downloads it leaned on."""
-        hist = hist[-self.L:] if hist else []
-        if not hist:
-            return []
-        return _forward(self, [self.item(t, E) for t in hist])["A"][-1]
+        return self.user_and_attention(hist, E)[1]
 
     @staticmethod
     def score(u: list[float], v: list[float]) -> float:

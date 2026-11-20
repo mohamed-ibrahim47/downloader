@@ -60,6 +60,7 @@ class Recommender:
         self._refreshing = threading.Lock()
         self._training = threading.Lock()
         self._pending = None  # the latest train() run, until v7/v8 have trained on it
+        self._models: dict[str, tuple[str, object]] = {}  # settings key -> (model JSON, parsed v7/v8)
         self._retraining = threading.Lock()
         self._meaning_cache: tuple | None = None  # (vectors, key, MeaningIndex), see _meaning_index
         self._vectors: embed.Vectors | None = None
@@ -242,7 +243,7 @@ class Recommender:
             return None
         if s8.get("trained_at") != saved.get("trained_at") or s8.get("vectors_at") != self.vectors_meta().get("at"):
             return None
-        return sasrec.SasRec.from_json(s8["model"])
+        return self._parsed(SASREC_KEY, s8["model"], sasrec.SasRec.from_json)
 
     def two_tower_info(self) -> dict | None:
         """v7's latest training for "Why this order?"; None when its setting is off."""
@@ -260,7 +261,14 @@ class Recommender:
             return None
         if s7.get("trained_at") != saved.get("trained_at") or s7.get("vectors_at") != self.vectors_meta().get("at"):
             return None
-        return twotower.TwoTower.from_json(s7["model"])
+        return self._parsed(TWO_TOWER_KEY, s7["model"], twotower.TwoTower.from_json)
+
+    def _parsed(self, key: str, text: str, load):
+        """The saved model, parsed once while its JSON stays the same (ranker() and view() both ask for it)."""
+        hit = self._models.get(key)
+        if hit is None or hit[0] != text:
+            hit = self._models[key] = (text, load(text))
+        return hit[1]
 
     def _train_bandit(self, rows) -> None:
         """The contextual bandit's belief, from the same rows (meaning already recomputed). Never raises:
@@ -506,10 +514,9 @@ class Recommender:
         if name in ("v7", "v8"):
             past = sorted((d for d in profile.docs if d.weight > 0), key=lambda d: d.added_at)  # oldest first
             hist = [d.tokens for d in past]
-            u = m.user(hist, vectors)
+            u, a = m.user_and_attention(hist, vectors) if name == "v8" else (m.user(hist, vectors), [])
             scorer = lambda s, _affinity: m.score(u, m.item(tokenize(s.candidate.title), vectors))  # noqa: E731
-            if name == "v8" and past:
-                a = m.attention(hist, vectors)  # over the newest L, oldest first
+            if a:  # v8's attention over the newest L, oldest first
                 read = past[-len(a):]
                 leaned_on = read[max(range(len(a)), key=lambda i: (a[i], i))].title  # ties: the newest
         elif m is not None:

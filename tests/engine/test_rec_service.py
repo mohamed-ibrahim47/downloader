@@ -1036,3 +1036,19 @@ def test_train_experimental_with_nothing_pending(rec, store, with_starter):
     _set(store, rec_sasrec=True)
     rec.train_experimental()
     assert store.get_setting("rec_sasrec_model") is None
+
+
+def test_v8_view_parses_once_and_reads_history_once(rec, store, with_starter, monkeypatch):
+    """Review minor: the saved model is parsed once while it stays the same, and view() runs one forward pass."""
+    _add_titles(store, 3)
+    _set(store, rec_sasrec=True)
+    rec.refresh()
+    _save_v8(rec, store)
+    parsed, forwards = [], []
+    real_parse, real_fwd = SasRec.from_json.__func__, sasrec._forward
+    monkeypatch.setattr(SasRec, "from_json", classmethod(lambda cls, t: parsed.append(1) or real_parse(cls, t)))
+    monkeypatch.setattr(sasrec, "_forward", lambda *a: forwards.append(1) or real_fwd(*a))
+    assert rec.ranker() == "v8"
+    view = rec.view()
+    rec.ranker()
+    assert view.suggestions and len(parsed) == 1 and len(forwards) == 1

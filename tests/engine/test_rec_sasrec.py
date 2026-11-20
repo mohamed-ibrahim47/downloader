@@ -276,3 +276,15 @@ def test_seq_negs_skip_titles_with_no_words():
     assert twotower.tokenize("a") == []
     for e in sasrec.examples(rows, HIST, random.Random(0)):
         assert all(n for negs in e.seq_negs for n in negs)
+
+
+def test_user_and_attention_in_one_pass(monkeypatch):
+    """Review minor: view() needs both; one forward pass gives both."""
+    case, E, m, batch = _case()
+    calls = []
+    real = sasrec._forward
+    monkeypatch.setattr(sasrec, "_forward", lambda *a: calls.append(1) or real(*a))
+    u, a = m.user_and_attention(batch[0].hist, E)
+    assert len(calls) == 1
+    assert u == m.user(batch[0].hist, E) and a == m.attention(batch[0].hist, E)
+    assert m.user_and_attention([], E) == ([0.0] * m.k, [])
