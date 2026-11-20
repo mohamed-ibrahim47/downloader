@@ -268,3 +268,11 @@ def test_examples_scale_with_a_big_log():
     ex = sasrec.examples(rows, hist, random.Random(0))
     assert time.perf_counter() - t < 2.0
     assert len(ex) == 250 and all(len(n) == sasrec.NEG_SEQ for e in ex for n in e.seq_negs)
+
+
+def test_seq_negs_skip_titles_with_no_words():
+    """Review minor: a shown title that tokenizes to nothing ("a") would be a constant vector, not a real "no"."""
+    rows = _log() + [_row("g", 20.0, 0, "a")]
+    assert twotower.tokenize("a") == []
+    for e in sasrec.examples(rows, HIST, random.Random(0)):
+        assert all(n for negs in e.seq_negs for n in negs)

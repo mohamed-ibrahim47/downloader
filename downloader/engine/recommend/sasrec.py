@@ -403,7 +403,7 @@ def examples(rows: list[Row], history: list[tuple[float, list[str]]], rng: rando
     task, step t gets up to NEG_SEQ wrong answers drawn (without replacement) from the videos you were shown and
     didn't download, anywhere in the log, never the download that really came next."""
     hist_sorted = sorted(history, key=lambda h: h[0])
-    keys = sorted({tuple(tokenize(r.title)) for r in rows if r.label == 0 and r.title})
+    keys = sorted({tuple(tokenize(r.title)) for r in rows if r.label == 0 and r.title} - {()})  # () = no words
     pool = [list(x) for x in keys]  # built once: rebuilding it per step took 15 s on a full log
     where = {x: i for i, x in enumerate(keys)}
     out = []
