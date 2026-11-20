@@ -336,7 +336,7 @@ class ForYouPage(QWidget):
         self.state = "loading"  # the old cards stay up until the new list arrives
         self._updated.setText(LOADING)
         self._refresh.setEnabled(False)
-        task = run_in_pool(self._rec.refresh)
+        task = run_in_pool(lambda: self._rec.refresh(experimental=False))
         task.tag = self._token
         task.tagged_done.connect(self._on_refreshed)
         task.tagged_failed.connect(self._on_failed)
@@ -350,6 +350,8 @@ class ForYouPage(QWidget):
         # The word vectors retrain on their own clock (every 300 new titles) and take minutes: after the list
         # is up, as a task of their own, so the page is never held on "Looking for new videos...".
         run_in_pool(self._rec.retrain_vectors)
+        # v7/v8 (when on) train the same way, after the list is up; "Why this order?" then shows their verdict.
+        run_in_pool(self._rec.train_experimental).done.connect(lambda _r: self.refresh_why())
 
     def _on_failed(self, token, message: str) -> None:
         if token != self._token:

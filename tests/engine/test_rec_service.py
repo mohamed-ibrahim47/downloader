@@ -1013,3 +1013,26 @@ def test_old_database_sasrec_on(rec, store, with_starter):
     assert rec.ranker() == "v2"
     assert rec.sasrec_info() is None
     rec.suggestions()
+
+
+def test_refresh_can_leave_v7_v8_for_later(rec, store, with_starter, monkeypatch):
+    """Review fix: the page shows the new list before v7/v8 train (they can take minutes on a big log)."""
+    _set(store, rec_sasrec=True, rec_two_tower=True)
+    calls = []
+    real7, real8 = twotower.contest, sasrec.contest
+    monkeypatch.setattr(twotower, "contest", lambda *a, **k: calls.append("v7") or real7(*a, **k))
+    monkeypatch.setattr(sasrec, "contest", lambda *a, **k: calls.append("v8") or real8(*a, **k))
+    rec.refresh(experimental=False)
+    assert calls == [] and rec.model() is not None
+    assert store.get_setting("rec_sasrec_model") is None
+    rec.train_experimental()
+    assert calls == ["v7", "v8"]
+    assert rec.sasrec_info()["trained_at"] == rec.two_tower_info()["trained_at"] == rec.model()["trained_at"]
+    rec.train_experimental()  # nothing pending any more: no second training
+    assert calls == ["v7", "v8"]
+
+
+def test_train_experimental_with_nothing_pending(rec, store, with_starter):
+    _set(store, rec_sasrec=True)
+    rec.train_experimental()
+    assert store.get_setting("rec_sasrec_model") is None

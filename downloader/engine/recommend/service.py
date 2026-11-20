@@ -59,6 +59,7 @@ class Recommender:
         self._rng = rng or random.Random()
         self._refreshing = threading.Lock()
         self._training = threading.Lock()
+        self._pending = None  # the latest train() run, until v7/v8 have trained on it
         self._retraining = threading.Lock()
         self._meaning_cache: tuple | None = None  # (vectors, key, MeaningIndex), see _meaning_index
         self._vectors: embed.Vectors | None = None
@@ -85,11 +86,13 @@ class Recommender:
         last = self.log.last_refresh()
         return last is None or self._clock() - last > REFRESH_AFTER
 
-    def refresh(self) -> None:
+    def refresh(self, experimental: bool = True) -> None:
         """Search YouTube and replace the cache. Blocking.
 
         If every search fails, or none finds anything, the old cache stays. If a refresh is already
         running (the page was opened twice), this one returns at once without searching.
+        `experimental=False` leaves v7/v8 for `train_experimental()`: the page draws the list first, because
+        those two can take minutes on a big log.
         """
         if not self._refreshing.acquire(blocking=False):
             return
@@ -102,18 +105,20 @@ class Recommender:
                 self.log.save_candidates(cands, self._clock())
             else:
                 self.log.mark_refreshed(self._clock())
-            self.train()  # the list the owner just saw is settled now: learn from it
+            self.train(experimental)  # the list the owner just saw is settled now: learn from it
         finally:
             self._refreshing.release()
 
     # ---- the learned rankers (v2, v3, the starter) -------------------------------------
 
-    def train(self) -> None:
+    def train(self, experimental: bool = True) -> None:
         """Train v2 and v3 on the log, measure them against v1, and save which one should rank. Blocking.
 
         Runs after each refresh (in the pool) and when the owner picks another trainer. Also trains every
         installed v2 trainer on all rows, so the page can show their weights side by side. v3's final net is
         trained on all rows only when it won, for the number of passes its held-back run found.
+        The experimental rankers (v7, v8) then train on this same run, now or, with `experimental=False`,
+        when `train_experimental()` is called.
         """
         with self._training:
             now = self._clock()  # one stamp for rec_model and v7's model: v7 ranks only beside its own run
@@ -153,6 +158,21 @@ class Recommender:
                            "v3_epochs": rep.net.epochs if rep.net else 0},
                 "trained_at": now})
             self._train_bandit(rows)
+            # v7 and v8 judge themselves against this very run (its rows, its pick, its stamp).
+            self._pending = (rows, rep, ranker, now, vectors, vectors_at)
+        if experimental:
+            self.train_experimental()
+
+    def train_experimental(self) -> None:
+        """Train v7 and v8 (each only when its setting is on) on the latest `train()` run. Blocking; runs once
+        per run, so a second call does nothing. Their saved models carry that run's stamp, so they rank only
+        beside the `rec_model` it wrote (design v7 A7)."""
+        with self._training:
+            pending, self._pending = self._pending, None
+            if pending is None:
+                return
+            rows, rep, ranker, now, vectors, vectors_at = pending
+            settings = Settings.load(self.store)
             c7 = None
             if settings.rec_two_tower:  # off: v7's code never runs (design A1)
                 c7 = self._train_two_tower(rows, rep, ranker, now, vectors, vectors_at, settings)

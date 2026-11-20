@@ -403,14 +403,18 @@ def examples(rows: list[Row], history: list[tuple[float, list[str]]], rng: rando
     task, step t gets up to NEG_SEQ wrong answers drawn (without replacement) from the videos you were shown and
     didn't download, anywhere in the log, never the download that really came next."""
     hist_sorted = sorted(history, key=lambda h: h[0])
-    pool = sorted({tuple(tokenize(r.title)) for r in rows if r.label == 0 and r.title})
+    keys = sorted({tuple(tokenize(r.title)) for r in rows if r.label == 0 and r.title})
+    pool = [list(x) for x in keys]  # built once: rebuilding it per step took 15 s on a full log
+    where = {x: i for i, x in enumerate(keys)}
     out = []
     for refresh, rs in titled_lists(rows).items():
         hist = [tok for at, tok in hist_sorted if at < refresh][-HISTORY:]
         negs = []
         for t in range(len(hist) - 1):
-            options = [list(x) for x in pool if list(x) != hist[t + 1]]
-            negs.append(rng.sample(options, min(NEG_SEQ, len(options))))
+            right = where.get(tuple(hist[t + 1]))  # the download that came next is never a wrong answer
+            want = min(NEG_SEQ, len(pool) - (right is not None))
+            draw = rng.sample(range(len(pool)), min(want + 1, len(pool)))
+            negs.append([pool[i] for i in draw if i != right][:want])
         negatives = [tokenize(r.title) for r in rs if r.label == 0]
         for r in rs:
             if r.label == 1:

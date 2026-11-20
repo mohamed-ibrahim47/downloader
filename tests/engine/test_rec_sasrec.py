@@ -256,3 +256,15 @@ def test_contest_untitled_lists_left_out():
     c = sasrec.contest(_lists(untitled_tests=4), CAT_HISTORY, _words(), "v1", {})
     assert c.lists == 2 and not c.wins
     assert c.reason.startswith("Waiting for lists to test on: 2 of 3")
+
+
+def test_examples_scale_with_a_big_log():
+    """Review fix: the wrong-answer pool is built once, not once per step (it was 15 s on a full log)."""
+    import time
+    rows = [_row(f"v{n}-{j}", float(n + 100), int(j == 0), f"clip{n}x{j} words") for n in range(250)
+            for j in range(20)]
+    hist = [(float(i) / 100, [f"h{i}"]) for i in range(40)]
+    t = time.perf_counter()
+    ex = sasrec.examples(rows, hist, random.Random(0))
+    assert time.perf_counter() - t < 2.0
+    assert len(ex) == 250 and all(len(n) == sasrec.NEG_SEQ for e in ex for n in e.seq_negs)

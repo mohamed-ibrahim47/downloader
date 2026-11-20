@@ -384,12 +384,24 @@ def test_no_ndcg_line_before_any_test_list():
 def test_vectors_retrain_after_the_list_is_up(qtbot, rec, monkeypatch):
     order = []
     real = rec.refresh
-    monkeypatch.setattr(rec, "refresh", lambda: (real(), order.append("refresh")))
+    monkeypatch.setattr(rec, "refresh", lambda **kw: (real(**kw), order.append("refresh")))
     monkeypatch.setattr(rec, "retrain_vectors", lambda: order.append("retrain") or False)
     page = _page(qtbot, rec); page.open()
     qtbot.waitUntil(lambda: page.state == "list")
     qtbot.waitUntil(lambda: "retrain" in order)
     assert order == ["refresh", "retrain"]
+
+
+def test_v7_v8_train_after_the_list_is_up(qtbot, rec, monkeypatch):
+    """Review fix: v7/v8 training no longer holds the page on "Looking for new videos..."."""
+    order, kwargs = [], []
+    real = rec.refresh
+    monkeypatch.setattr(rec, "refresh", lambda **kw: (kwargs.append(kw), real(**kw), order.append("refresh")))
+    monkeypatch.setattr(rec, "train_experimental", lambda: order.append("experimental"))
+    page = _page(qtbot, rec); page.open()
+    qtbot.waitUntil(lambda: page.state == "list")
+    qtbot.waitUntil(lambda: "experimental" in order)
+    assert order[:2] == ["refresh", "experimental"] and kwargs == [{"experimental": False}]
 
 
 # ---- v5: the Discovery block --------------------------------------------------------
