@@ -390,7 +390,6 @@ class ForYouPage(QWidget):
             self._show_cold()
             return
         self._shown = view.suggestions
-        self._leaned_on = view.leaned_on
         self._clear_cards()
         for s in self._shown:
             card = SuggestionCard(s, why)
@@ -420,7 +419,7 @@ class ForYouPage(QWidget):
     def _set_ranker(self) -> None:
         self._ranker.setText(ranker_text(self._rec.model(), self._rec.ranker(), self._rec.vectors_meta(),
                                          self._rec.two_tower_info(), self._rec.sasrec_info(),
-                                         getattr(self, "_leaned_on", None))
+                                         self._rec.leaned_on())
                              + "\n\n" + discovery_text(self._rec.discovery_info()))
         self._nearest.setText(nearest_text(self._rec.nearest_words()))
 

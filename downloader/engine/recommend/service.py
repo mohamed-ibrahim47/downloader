@@ -49,6 +49,19 @@ class View:
     leaned_on: str | None = None  # v8 only: the past download its newest step attended to most
 
 
+def _past_downloads(profile: Profile) -> list:
+    """The profile's downloads, oldest first: "you" as v7 and v8 read it."""
+    return sorted((d for d in profile.docs if d.weight > 0), key=lambda d: d.added_at)
+
+
+def _leaned(past: list, a: list[float]) -> str | None:
+    """The title v8's attention row `a` (over the newest len(a) of `past`) weighs most; ties: the newest."""
+    if not a:
+        return None
+    read = past[-len(a):]
+    return read[max(range(len(a)), key=lambda i: (a[i], i))].title
+
+
 class Recommender:
     def __init__(self, store: Store, search=None, clock=time.time, rng: random.Random | None = None):
         self.store = store
@@ -512,13 +525,11 @@ class Recommender:
         index = self._meaning_index(profile, cands, vectors, model.idf) if vectors is not None else None
         leaned_on = None
         if name in ("v7", "v8"):
-            past = sorted((d for d in profile.docs if d.weight > 0), key=lambda d: d.added_at)  # oldest first
+            past = _past_downloads(profile)
             hist = [d.tokens for d in past]
             u, a = m.user_and_attention(hist, vectors) if name == "v8" else (m.user(hist, vectors), [])
             scorer = lambda s, _affinity: m.score(u, m.item(tokenize(s.candidate.title), vectors))  # noqa: E731
-            if a:  # v8's attention over the newest L, oldest first
-                read = past[-len(a):]
-                leaned_on = read[max(range(len(a)), key=lambda i: (a[i], i))].title  # ties: the newest
+            leaned_on = _leaned(past, a)
         elif m is not None:
             scorer = lambda s, affinity: m.prob(from_suggestion(s, affinity))  # noqa: E731
         elif name == "v4":
@@ -540,6 +551,18 @@ class Recommender:
         if log:
             self._log_shown(picks, profile, name)
         return View(True, picks, profile_words(profile, cands, words, model=model) if words else [], leaned_on)
+
+    def leaned_on(self) -> str | None:
+        """The past download v8's newest step attends to most, while v8 ranks (else None). Asked fresh, so
+        "Why this order?" is right even when v8 started ranking after the list on screen was drawn."""
+        name, m = self._learned()
+        settings = Settings.load(self.store)
+        vectors = self.vectors() if settings.rec_meaning else None
+        if name != "v8" or vectors is None:
+            return None
+        profile = build_profile(self.store.all(), self.log.dismissed(), self._clock(), files=settings.rec_files)
+        past = _past_downloads(profile)
+        return _leaned(past, m.user_and_attention([d.tokens for d in past], vectors)[1])
 
     def _meaning_index(self, profile: Profile, cands, vectors: embed.Vectors, idf) -> MeaningIndex:
         """The meaning index, built again only when the downloads, dismissals, candidates or vectors change.

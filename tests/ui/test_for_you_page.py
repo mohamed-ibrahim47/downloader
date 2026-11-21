@@ -524,3 +524,15 @@ def test_ranker_text_v8_off():
     from downloader.ui.for_you_page import ranker_text
     text = ranker_text({"active": False, "reason": "x", "report": {}, "compare": {}}, "v1", None, None, sasrec=None)
     assert "v8" not in text
+
+
+def test_why_text_asks_for_a_fresh_leaned_on(qtbot, rec, monkeypatch):
+    """Review minor: v8 can start ranking after the list was drawn; the line comes from the recommender then."""
+    page = _page(qtbot, rec)
+    page.open()
+    qtbot.waitUntil(lambda: bool(page.cards()), timeout=3000)
+    monkeypatch.setattr(rec, "ranker", lambda: "v8")
+    monkeypatch.setattr(rec, "sasrec_info", lambda: V8)
+    monkeypatch.setattr(rec, "leaned_on", lambda: "Fresh piano title")
+    page.findChild(QCheckBox, "why").setChecked(True)
+    assert "Leaned most on: Fresh piano title" in page.findChild(QLabel, "rankerInfo").text()

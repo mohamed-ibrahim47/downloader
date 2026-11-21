@@ -1052,3 +1052,13 @@ def test_v8_view_parses_once_and_reads_history_once(rec, store, with_starter, mo
     view = rec.view()
     rec.ranker()
     assert view.suggestions and len(parsed) == 1 and len(forwards) == 1
+
+
+def test_leaned_on_matches_view_and_is_none_without_v8(rec, store, with_starter):
+    """Review minor: "Leaned most on" is computed when asked, so it can't be stale after a training."""
+    _add_titles(store, 3)
+    _set(store, rec_sasrec=True)
+    rec.refresh()
+    assert rec.leaned_on() is None  # v8 not ranking yet
+    _save_v8(rec, store)
+    assert rec.leaned_on() == rec.view().leaned_on is not None
