@@ -1062,3 +1062,21 @@ def test_leaned_on_matches_view_and_is_none_without_v8(rec, store, with_starter)
     assert rec.leaned_on() is None  # v8 not ranking yet
     _save_v8(rec, store)
     assert rec.leaned_on() == rec.view().leaned_on is not None
+
+
+def test_v7_and_v8_land_together(rec, store, with_starter, monkeypatch):
+    """Review minor: while v8 still trains, a v7 that just won must not rank yet, so the page never steps
+    pick -> v7 -> v8 within one training run. Both results are saved together at the end."""
+    _set(store, rec_sasrec=True, rec_two_tower=True)
+    split7 = twotower.init(3, 2, _random.Random(0))
+    monkeypatch.setattr(twotower, "contest",
+                        lambda *a, **k: twotower.Contest(3, 0.9, 0.5, True, "v7 beats v4", model=split7))
+    seen = []
+
+    def fake(rows, history, E, rival, models, v7=None):
+        seen.append((rival, rec.ranker()))
+        return sasrec.Contest(3, 0.4, 0.9, False, "v8 didn't beat v7 yet (NDCG 0.40 vs 0.90)")
+    monkeypatch.setattr(sasrec, "contest", fake)
+    rec.refresh()
+    assert seen and seen[0][0] == "v7" and seen[0][1] != "v7"
+    assert rec.ranker() == "v7"

@@ -187,18 +187,25 @@ class Recommender:
                 return
             rows, rep, ranker, now, vectors, vectors_at = pending
             settings = Settings.load(self.store)
-            c7 = None
+            out7 = out8 = c7 = None
             if settings.rec_two_tower:  # off: v7's code never runs (design A1)
-                c7 = self._train_two_tower(rows, rep, ranker, now, vectors, vectors_at, settings)
+                out7, c7 = self._train_two_tower(rows, rep, ranker, now, vectors, vectors_at, settings)
             if settings.rec_sasrec:  # off: v8's code never runs (design v8, A1)
-                won7 = c7 is not None and c7.wins and bool((self.store.get_setting(TWO_TOWER_KEY) or {}).get("active"))
-                self._train_sasrec(rows, rep, "v7" if won7 else ranker, now, vectors, vectors_at, settings,
-                                   c7.model if won7 else None)
+                won7 = c7 is not None and c7.wins and bool(out7 and out7.get("active"))
+                out8 = self._train_sasrec(rows, rep, "v7" if won7 else ranker, now, vectors, vectors_at, settings,
+                                          c7.model if won7 else None)
+            # Saved together at the end, v8 first: a v7 that just won doesn't rank while v8 still trains, so the
+            # page changes ranker once per run, not pick -> v7 -> v8.
+            if out8 is not None:
+                self.store.set_setting(SASREC_KEY, out8)
+            if out7 is not None:
+                self.store.set_setting(TWO_TOWER_KEY, out7)
 
     def _train_two_tower(self, rows, rep, rival: str, now: float, vectors, vectors_at,
-                         settings: Settings) -> "twotower.Contest | None":
+                         settings: Settings) -> "tuple[dict, twotower.Contest | None]":
         """v7 against the ranker this run picked, on the newest titled lists (design A4, A7). Never raises.
-        `vectors_at`: the stamp read when `train()` took `vectors`. Returns the contest (v8 re-scores its v7)."""
+        `vectors_at`: the stamp read when `train()` took `vectors`. Returns what to save under TWO_TOWER_KEY and
+        the contest (v8 re-scores its v7)."""
         c = None
         out = {"trained_at": now, "vectors_at": vectors_at if vectors else None,
                "active": False, "reason": "v7 needs Match by meaning", "ndcg": {}, "lists": 0, "model": None}
@@ -216,13 +223,12 @@ class Recommender:
             except Exception as e:  # a training bug must never take the page down
                 out.update(active=False, model=None, reason=f"Training failed: {e}")
                 c = None
-        self.store.set_setting(TWO_TOWER_KEY, out)
-        return c
+        return out, c
 
     def _train_sasrec(self, rows, rep, rival: str, now: float, vectors, vectors_at, settings: Settings,
-                      v7: "twotower.TwoTower | None") -> None:
+                      v7: "twotower.TwoTower | None") -> dict:
         """v8 against the ranker that would otherwise rank (v7 when v7 won this run), on the same newest titled
-        lists (design v8, A4). Never raises."""
+        lists (design v8, A4). Never raises. Returns what to save under SASREC_KEY."""
         out = {"trained_at": now, "vectors_at": vectors_at if vectors else None, "active": False,
                "reason": "v8 needs Match by meaning", "ndcg": {}, "lists": 0, "rival": rival, "model": None}
         if vectors is not None:
@@ -239,7 +245,7 @@ class Recommender:
                     out.update(active=True, model=m.to_json())
             except Exception as e:  # a training bug must never take the page down
                 out.update(active=False, model=None, reason=f"Training failed: {e}")
-        self.store.set_setting(SASREC_KEY, out)
+        return out
 
     def sasrec_info(self) -> dict | None:
         """v8's latest training for "Why this order?"; None when its setting is off."""
